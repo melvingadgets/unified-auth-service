@@ -63,7 +63,7 @@ export const sendVerificationEmail = async (args: {
   fullName: string;
   verifyUrl: string;
 }) => {
-  const templatePath = path.join(__dirname, "../../email-templates/verification.ejs");
+  const templatePath = path.join(__dirname, "../email-templates/verification.ejs");
   const html = await ejs.renderFile(templatePath, {
     fullName: args.fullName,
     verifyUrl: args.verifyUrl,
@@ -81,7 +81,7 @@ export const sendResetPasswordEmail = async (args: {
   fullName: string;
   resetUrl: string;
 }) => {
-  const templatePath = path.join(__dirname, "../../email-templates/reset-password.ejs");
+  const templatePath = path.join(__dirname, "../email-templates/reset-password.ejs");
   const html = await ejs.renderFile(templatePath, {
     fullName: args.fullName,
     resetUrl: args.resetUrl,
