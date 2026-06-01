@@ -1,6 +1,12 @@
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
+import ejs from "ejs";
+import path from "path";
+import { fileURLToPath } from "url";
 import { config } from "../config/Config.js";
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
 
 const canSendMail = Boolean(
   config.mail.from &&
@@ -56,18 +62,17 @@ export const sendVerificationEmail = async (args: {
   to: string;
   fullName: string;
   verifyUrl: string;
-  appDisplayName: string;
 }) => {
+  const templatePath = path.join(__dirname, "../../email-templates/verification.ejs");
+  const html = await ejs.renderFile(templatePath, {
+    fullName: args.fullName,
+    verifyUrl: args.verifyUrl,
+  });
+
   await sendHtmlEmail({
     to: args.to,
-    subject: `Verify your ${args.appDisplayName} account`,
-    html: `
-      <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-        <p>Hello ${args.fullName},</p>
-        <p>Verify your ${args.appDisplayName} account with the link below.</p>
-        <p><a href="${args.verifyUrl}">${args.verifyUrl}</a></p>
-      </div>
-    `,
+    subject: `Verify your Melvin Gadgets account`,
+    html,
   });
 };
 
@@ -76,15 +81,15 @@ export const sendResetPasswordEmail = async (args: {
   fullName: string;
   resetUrl: string;
 }) => {
+  const templatePath = path.join(__dirname, "../../email-templates/reset-password.ejs");
+  const html = await ejs.renderFile(templatePath, {
+    fullName: args.fullName,
+    resetUrl: args.resetUrl,
+  });
+
   await sendHtmlEmail({
     to: args.to,
     subject: "Reset your password",
-    html: `
-      <div style="font-family: Arial, sans-serif; line-height: 1.5;">
-        <p>Hello ${args.fullName},</p>
-        <p>Use this link to reset your password:</p>
-        <p><a href="${args.resetUrl}">${args.resetUrl}</a></p>
-      </div>
-    `,
+    html,
   });
 };

@@ -70,7 +70,6 @@ export const RegisterUser = async (req: Request, res: Response) => {
           to: email,
           fullName,
           verifyUrl: buildVerifyUrl(token),
-          appDisplayName: appConfig.displayName,
         });
       }
     }
@@ -128,7 +127,6 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
           to: user.email,
           fullName: user.fullName,
           verifyUrl: buildVerifyUrl(token),
-          appDisplayName: appConfig.displayName,
         });
       }
       return res.status(403).json({ message: "please check your email to verify account" });
@@ -204,7 +202,6 @@ export const ResendVerificationEmail = async (req: Request, res: Response) => {
       to: user.email,
       fullName: user.fullName,
       verifyUrl: buildVerifyUrl(token),
-      appDisplayName: resolveAuthApp(user.originApp).displayName,
     });
 
     return res.status(200).json({ message: "Verification email sent" });
