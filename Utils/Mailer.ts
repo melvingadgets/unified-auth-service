@@ -1,16 +1,20 @@
 import nodemailer from "nodemailer";
+import { Resend } from "resend";
 import { config } from "../config/Config.js";
 
 const canSendMail = Boolean(
   config.mail.from &&
-    config.mail.smtp.gmailUser &&
-    config.mail.smtp.gmailAppPassword
+    ((config.mail.provider === "smtp" && config.mail.smtp.gmailUser && config.mail.smtp.gmailAppPassword) ||
+      (config.mail.provider === "resend" && config.mail.resend.apiKey))
 );
 
+const resendClient =
+  config.mail.provider === "resend" && config.mail.resend.apiKey
+    ? new Resend(config.mail.resend.apiKey)
+    : null;
+
 const getTransporter = () => {
-  if (!canSendMail) {
-    throw new Error("Mail transport is not configured");
-  }
+  if (config.mail.provider !== "smtp") return null;
 
   return nodemailer.createTransport({
     host: "smtp.gmail.com",
@@ -24,13 +28,28 @@ const getTransporter = () => {
 };
 
 const sendHtmlEmail = async (args: { to: string; subject: string; html: string }) => {
-  const transporter = getTransporter();
-  await transporter.sendMail({
-    from: config.mail.from,
-    to: args.to,
-    subject: args.subject,
-    html: args.html,
-  });
+  if (!canSendMail) {
+    throw new Error("Mail transport is not configured");
+  }
+
+  if (config.mail.provider === "resend" && resendClient) {
+    await resendClient.emails.send({
+      from: config.mail.from,
+      to: args.to,
+      subject: args.subject,
+      html: args.html,
+    });
+  } else {
+    const transporter = getTransporter();
+    if (transporter) {
+      await transporter.sendMail({
+        from: config.mail.from,
+        to: args.to,
+        subject: args.subject,
+        html: args.html,
+      });
+    }
+  }
 };
 
 export const sendVerificationEmail = async (args: {

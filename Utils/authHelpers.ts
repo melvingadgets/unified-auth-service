@@ -270,7 +270,11 @@ export const shouldRequireEmailVerification = (app: AuthApp): boolean =>
   resolveAuthApp(app).requiresEmailVerification;
 
 export const isMailConfigured = () =>
-  Boolean(config.mail.from && config.mail.smtp.gmailUser && config.mail.smtp.gmailAppPassword);
+  Boolean(
+    config.mail.from &&
+      ((config.mail.provider === "smtp" && config.mail.smtp.gmailUser && config.mail.smtp.gmailAppPassword) ||
+        (config.mail.provider === "resend" && config.mail.resend.apiKey))
+  );
 
 export const createUserRecord = async (args: {
   email: string;

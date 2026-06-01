@@ -10,8 +10,10 @@ const publicBaseUrl = String(process.env.AUTH_SERVICE_PUBLIC_URL ?? `http://loca
 const corsOrigins = String(process.env.CORS_ORIGINS ?? "").trim();
 const mailFrom = String(process.env.MAIL_FROM ?? "").trim();
 const mailProviderRaw = String(process.env.MAIL_PROVIDER ?? "smtp").trim().toLowerCase();
+const mailProvider = mailProviderRaw === "resend" ? "resend" : "smtp";
 const gmailUser = String(process.env.GMAIL_USER ?? "").trim();
 const gmailAppPassword = String(process.env.GMAIL_APP_PASSWORD ?? "").trim();
+const resendApiKey = String(process.env.RESEND_API_KEY ?? "").trim();
 
 const missing: string[] = [];
 if (!databaseUrl) missing.push("DATABASE_URL");
@@ -31,11 +33,14 @@ export const config = {
     ? corsOrigins.split(",").map((origin) => origin.trim()).filter(Boolean)
     : [],
   mail: {
-    provider: mailProviderRaw === "smtp" ? "smtp" : "smtp",
+    provider: mailProvider,
     from: mailFrom,
     smtp: {
       gmailUser,
       gmailAppPassword,
+    },
+    resend: {
+      apiKey: resendApiKey,
     },
   },
 };
