@@ -39,12 +39,17 @@ const sendHtmlEmail = async (args: { to: string; subject: string; html: string }
   }
 
   if (config.mail.provider === "resend" && resendClient) {
-    await resendClient.emails.send({
+    const { data, error } = await resendClient.emails.send({
       from: config.mail.from,
       to: args.to,
       subject: args.subject,
       html: args.html,
     });
+    
+    if (error) {
+      console.error("Resend Error:", error);
+      throw new Error(`Resend failed: ${error.message}`);
+    }
   } else {
     const transporter = getTransporter();
     if (transporter) {
