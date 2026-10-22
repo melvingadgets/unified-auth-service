@@ -3,9 +3,11 @@ import cors from "cors";
 import AuthRouter from "./Router/AuthRouter.js";
 import AdminRouter from "./Router/AdminRouter.js";
 import InternalRouter from "./Router/InternalRouter.js";
+import { requestLog } from "./Middleware/requestLog.js";
 import { config } from "./config/Config.js";
 
 export const MainApp = (app: Application) => {
+  app.use(requestLog("auth"));
   app.use(express.json());
 
   const corsOptions: cors.CorsOptions = {

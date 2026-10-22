@@ -8,6 +8,11 @@ declare global {
       authSession?: {
         jti: string;
       };
+      traceId?: string;
+      // Set by service-token verification once services authenticate to each other.
+      service?: {
+        id: string;
+      };
     }
   }
 }
