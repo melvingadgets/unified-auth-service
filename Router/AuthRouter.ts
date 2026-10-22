@@ -4,6 +4,7 @@ import { verifyToken } from "../Middleware/verifyToken.js";
 import {
   ForgotPassword,
   GetMe,
+  GoogleLogin,
   ListMySessions,
   LoginUser,
   LogoutAllSessions,
@@ -21,6 +22,7 @@ const router = express.Router();
 
 router.post("/register", authRateLimiter, RegisterUser);
 router.post("/login", authRateLimiter, LoginUser);
+router.post("/google", authRateLimiter, GoogleLogin);
 router.get("/verify-email/:token", VerifyEmail);
 router.post("/resend-verification", authRateLimiter, ResendVerificationEmail);
 router.post("/forgot-password", authRateLimiter, ForgotPassword);

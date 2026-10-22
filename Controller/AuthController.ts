@@ -1,7 +1,7 @@
 import type { Request, Response } from "express";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
-import { resolveAuthApp } from "../config/AppConfig.js";
+
 import { sendResetPasswordEmail, sendVerificationEmail } from "../Utils/Mailer.js";
 import {
   buildDeviceInfo,
@@ -20,7 +20,7 @@ import {
   isMailConfigured,
   issueEmailVerificationToken,
   issuePasswordResetToken,
-  resolveLoginApp,
+
   toSafeProfile,
   toSafeUser,
 } from "../Utils/authHelpers.js";
@@ -33,12 +33,6 @@ export const RegisterUser = async (req: Request, res: Response) => {
     const fullName = normalizeString(req.body?.fullName);
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password ?? "");
-    const appConfig = resolveAuthApp(req.body?.app);
-
-    if (!appConfig.allowPublicRegistration) {
-      return res.status(403).json({ message: "Public registration is not allowed for this app" });
-    }
-
     if (!fullName || !email || !password) {
       return res.status(400).json({ message: "fullName, email and password are required" });
     }
@@ -55,23 +49,20 @@ export const RegisterUser = async (req: Request, res: Response) => {
       passwordHash: await hashPassword(password),
       fullName,
       role: "User",
-      app: appConfig.slug,
-      emailVerified: !appConfig.requiresEmailVerification,
+      emailVerified: false,
     });
 
-    let verificationRequired = appConfig.requiresEmailVerification;
-    if (verificationRequired) {
-      if (!isMailConfigured()) {
-        verificationRequired = false;
-        await UserModel.findByIdAndUpdate(user._id, { $set: { emailVerified: true } });
-      } else {
-        const token = await issueEmailVerificationToken(user._id);
-        await sendVerificationEmail({
-          to: email,
-          fullName,
-          verifyUrl: buildVerifyUrl(token),
-        });
-      }
+    let verificationRequired = true;
+    if (!isMailConfigured()) {
+      verificationRequired = false;
+      await UserModel.findByIdAndUpdate(user._id, { $set: { emailVerified: true } });
+    } else {
+      const token = await issueEmailVerificationToken(user._id);
+      await sendVerificationEmail({
+        to: email,
+        fullName,
+        verifyUrl: buildVerifyUrl(token),
+      });
     }
 
     return res.status(201).json({
@@ -103,9 +94,6 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
   try {
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password ?? "");
-    const app = resolveLoginApp(req.body?.app);
-    const appConfig = resolveAuthApp(app);
-
     const user = await UserModel.findOne({ email }).select("+password").lean();
     if (!user) {
       return res.status(404).json({ message: "user does not exist" });
@@ -115,12 +103,16 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
       return res.status(403).json({ message: "Account is disabled" });
     }
 
+    if (!user.password) {
+      return res.status(400).json({ message: "This account uses Google Sign-In. Please sign in with Google." });
+    }
+
     const validPassword = await comparePassword(password, String(user.password));
     if (!validPassword) {
       return res.status(404).json({ message: "Password is incorrect" });
     }
 
-    if (appConfig.requiresEmailVerification && !user.emailVerified) {
+    if (!user.emailVerified) {
       if (isMailConfigured()) {
         const token = await issueEmailVerificationToken(user._id);
         await sendVerificationEmail({
@@ -139,7 +131,6 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
         fullName: user.fullName,
         role: user.role,
       },
-      app,
       device: buildDeviceInfo(req, req.body?.device),
     });
 
@@ -446,4 +437,104 @@ export const UpdateMyProfile = async (req: Request, res: Response) => {
       profile: toSafeProfile(profile),
     },
   });
+};
+
+import { OAuth2Client } from "google-auth-library";
+import { config as appConfig } from "../config/Config.js";
+
+const client = new OAuth2Client(appConfig.googleClientId);
+
+export const GoogleLogin = async (req: Request, res: Response) => {
+  try {
+    const idToken = String(req.body?.idToken ?? "").trim();
+    if (!idToken) {
+      return res.status(400).json({ message: "idToken is required" });
+    }
+
+    if (!appConfig.googleClientId) {
+      return res.status(500).json({ message: "Google Client ID is not configured on the server" });
+    }
+
+    const ticket = await client.verifyIdToken({
+      idToken,
+      audience: appConfig.googleClientId,
+    });
+
+    const payload = ticket.getPayload();
+    if (!payload || !payload.email) {
+      return res.status(400).json({ message: "Invalid Google token payload" });
+    }
+
+    const email = payload.email.toLowerCase().trim();
+    const googleId = payload.sub;
+    const fullName = payload.name || "Google User";
+    const avatar = payload.picture || "";
+
+    let user = await UserModel.findOne({ email }).lean();
+
+    if (user) {
+      if (user.disabled) {
+        return res.status(403).json({ message: "Account is disabled" });
+      }
+
+      if (!user.googleId) {
+        await UserModel.updateOne({ _id: user._id }, { $set: { googleId } });
+        user.googleId = googleId;
+      }
+      if (!user.emailVerified) {
+        await UserModel.updateOne({ _id: user._id }, { $set: { emailVerified: true } });
+        user.emailVerified = true;
+      }
+    } else {
+      const newUser = new UserModel({
+        email,
+        googleId,
+        fullName,
+        role: "User",
+        emailVerified: true,
+        disabled: false,
+        originApp: "auth-service",
+      });
+      await newUser.save();
+      user = await UserModel.findById(newUser._id).lean();
+
+      if (!user) throw new Error("Failed to create user");
+
+      await createOrUpdateProfileForUser({
+        userId: user._id,
+        fullName,
+        updates: { avatar },
+      });
+    }
+
+    if (!user) throw new Error("User is null");
+
+    const session = await createSessionForUser({
+      user: {
+        _id: user._id,
+        email: user.email,
+        fullName: user.fullName,
+        role: user.role,
+      },
+      device: buildDeviceInfo(req, req.body?.device),
+    });
+
+    res.cookie("sessionId", session.token, {
+      httpOnly: true,
+      sameSite: "lax",
+      expires: session.expiresAt,
+    });
+
+    return res.status(201).json({
+      success: 1,
+      message: "Google login successful",
+      data: session.token,
+      user: toSafeUser(user as any),
+    });
+  } catch (error: any) {
+    return res.status(400).json({
+      message: "Google authentication failed",
+      reason: error?.message || "Unknown error",
+    });
+  }
 };

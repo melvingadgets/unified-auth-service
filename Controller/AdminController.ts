@@ -47,8 +47,7 @@ export const AdminCreateUser = async (req: Request, res: Response) => {
       email,
       passwordHash: await hashPassword(password),
       fullName,
-      role: requestedRole,
-      app: "auth-service",
+      role: normalizeRoleInput(req.body?.role || "User"),
       emailVerified: true,
     });
 

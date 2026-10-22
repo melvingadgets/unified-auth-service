@@ -8,6 +8,7 @@ const jwtSecret = String(process.env.AUTH_JWT_SECRET ?? process.env.JWT_SECRET ?
 const serviceKey = String(process.env.AUTH_SERVICE_KEY ?? "").trim();
 const publicBaseUrl = String(process.env.AUTH_SERVICE_PUBLIC_URL ?? `http://localhost:${portValue}`).trim();
 const corsOrigins = String(process.env.CORS_ORIGINS ?? "").trim();
+const googleClientId = String(process.env.GOOGLE_CLIENT_ID ?? "").trim();
 const mailFrom = String(process.env.MAIL_FROM ?? "").trim();
 const mailProviderRaw = String(process.env.MAIL_PROVIDER ?? "smtp").trim().toLowerCase();
 const mailProvider = mailProviderRaw === "resend" ? "resend" : "smtp";
@@ -32,6 +33,7 @@ export const config = {
   corsOrigins: corsOrigins
     ? corsOrigins.split(",").map((origin) => origin.trim()).filter(Boolean)
     : [],
+  googleClientId,
   mail: {
     provider: mailProvider,
     from: mailFrom,

@@ -4,7 +4,7 @@ import mongoose from "mongoose";
 import ProfileModel from "../Model/ProfileModel.js";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
-import { resolveAuthApp } from "../config/AppConfig.js";
+
 import { config } from "../config/Config.js";
 import type { AuthApp, AuthRole } from "../types/auth.js";
 import {
@@ -110,7 +110,7 @@ export const createOrUpdateProfileForUser = async (args: {
 
 export const createSessionForUser = async (args: {
   user: { _id: mongoose.Types.ObjectId | string; email: string; fullName: string; role: AuthRole };
-  app: AuthApp;
+  app?: AuthApp;
   device?: Partial<{
     userAgent: string;
     ip: string;
@@ -125,7 +125,7 @@ export const createSessionForUser = async (args: {
     fullName: args.user.fullName,
     role: args.user.role,
     jti,
-    app: args.app,
+    app: args.app || "auth-service",
   });
   const expiresAt = decodeTokenExpiry(token);
 
@@ -133,7 +133,7 @@ export const createSessionForUser = async (args: {
     user: args.user._id,
     jti,
     active: true,
-    app: args.app,
+    app: args.app || "auth-service",
     device: {
       userAgent: args.device?.userAgent || "",
       ip: args.device?.ip || "",
@@ -217,7 +217,7 @@ export const consumePasswordResetToken = async (token: string, nextPasswordHash:
     { returnDocument: "after" }
   ).select("+password");
 
-export const resolveLoginApp = (value: unknown) => resolveAuthApp(value).slug;
+
 
 export const buildVerifyUrl = (token: string) =>
   `${config.publicBaseUrl}/api/v1/auth/verify-email/${encodeURIComponent(token)}`;
@@ -266,8 +266,7 @@ export const normalizeRoleInput = (value: unknown): AuthRole => {
   throw new Error("role must be one of: User, Admin, SuperAdmin");
 };
 
-export const shouldRequireEmailVerification = (app: AuthApp): boolean =>
-  resolveAuthApp(app).requiresEmailVerification;
+
 
 export const isMailConfigured = () =>
   Boolean(
@@ -281,7 +280,7 @@ export const createUserRecord = async (args: {
   passwordHash: string;
   fullName: string;
   role: AuthRole;
-  app: AuthApp;
+  originApp?: AuthApp;
   emailVerified: boolean;
   legacyIds?: {
     easybuy?: string;
@@ -295,7 +294,7 @@ export const createUserRecord = async (args: {
     role: args.role,
     emailVerified: args.emailVerified,
     disabled: false,
-    originApp: args.app,
+    originApp: args.originApp || "auth-service",
   };
 
   if (args.legacyIds) {

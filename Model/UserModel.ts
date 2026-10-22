@@ -3,7 +3,8 @@ import type { AuthApp, AuthRole } from "../types/auth.js";
 
 export interface AuthUser {
   email: string;
-  password: string;
+  password?: string;
+  googleId?: string;
   fullName: string;
   role: AuthRole;
   emailVerified: boolean;
@@ -35,8 +36,14 @@ const UserSchema = new mongoose.Schema<AuthUserDocument>(
     },
     password: {
       type: String,
-      required: true,
+      required: false,
       select: false,
+    },
+    googleId: {
+      type: String,
+      sparse: true,
+      unique: true,
+      index: true,
     },
     fullName: {
       type: String,

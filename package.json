@@ -8,6 +8,7 @@
     "build": "tsc",
     "start": "node dist/Server.js",
     "dev": "tsx watch Server.ts",
+    "migrate:easybuy": "tsx scripts/migrate-easybuy.ts",
     "migrate:users": "tsx migrations/migrate-users.ts",
     "migrate:sessions": "tsx migrations/migrate-sessions.ts",
     "migrate:refs": "tsx migrations/update-consumer-refs.ts"
@@ -18,6 +19,7 @@
     "dotenv": "^16.4.5",
     "ejs": "^6.0.1",
     "express": "^4.21.0",
+    "google-auth-library": "^10.6.2",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.6.3",
     "nodemailer": "^6.9.15",
