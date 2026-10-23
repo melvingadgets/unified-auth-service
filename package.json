@@ -8,18 +8,23 @@
     "build": "tsc",
     "start": "node dist/Server.js",
     "dev": "tsx watch Server.ts",
+    "test": "vitest run",
+    "keys:rotate": "tsx scripts/signing-keys.ts",
+    "clients:rotate": "tsx scripts/oauth-clients.ts",
     "migrate:easybuy": "tsx scripts/migrate-easybuy.ts",
     "migrate:users": "tsx migrations/migrate-users.ts",
     "migrate:sessions": "tsx migrations/migrate-sessions.ts",
     "migrate:refs": "tsx migrations/update-consumer-refs.ts"
   },
   "dependencies": {
+    "@melvingadgets/platform-kit": "0.2.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "ejs": "^6.0.1",
     "express": "^4.21.0",
     "google-auth-library": "^10.6.2",
+    "jose": "6.2.13",
     "jsonwebtoken": "^9.0.2",
     "mongoose": "^8.6.3",
     "nodemailer": "^6.9.15",
@@ -33,7 +38,10 @@
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^22.5.5",
     "@types/nodemailer": "^6.4.15",
+    "@types/supertest": "^7.2.1",
+    "supertest": "^7.3.1",
     "tsx": "^4.19.0",
-    "typescript": "^5.6.2"
+    "typescript": "^5.6.2",
+    "vitest": "^5.0.5"
   }
 }

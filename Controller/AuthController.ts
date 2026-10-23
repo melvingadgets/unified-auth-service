@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { normalizeEmail as normalizePlatformEmail, normalizePhone } from "@melvingadgets/platform-kit";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
 
@@ -20,7 +21,8 @@ import {
   isMailConfigured,
   issueEmailVerificationToken,
   issuePasswordResetToken,
-
+  platformTokenFields,
+  rotateRefreshToken,
   toSafeProfile,
   toSafeUser,
 } from "../Utils/authHelpers.js";
@@ -90,29 +92,41 @@ export const RegisterUser = async (req: Request, res: Response) => {
   }
 };
 
+// Compared against when there is no stored password, so every failed login costs one bcrypt run.
+const UNUSED_PASSWORD_HASH = hashPassword("melvin-unused-password");
+
+// One answer for an unknown account, a wrong password and a Google-only account, so the
+// login form can't be used to find out who has an account (BACKEND-UNIFICATION.md §2, risk #7).
+const INVALID_CREDENTIALS = { message: "invalid credentials" };
+
+// Sign in with an email, or with a phone number once it has been verified (decision S4).
+const findUserByIdentifier = (identifier: string) => {
+  const email = normalizePlatformEmail(identifier);
+  if (email) return UserModel.findOne({ email }).select("+password").lean();
+  const phone = normalizePhone(identifier);
+  if (phone) return UserModel.findOne({ phone, phoneVerified: true }).select("+password").lean();
+  return Promise.resolve(null);
+};
+
 export const LoginUser = async (req: Request, res: Response): Promise<Response> => {
   try {
-    const email = normalizeEmail(req.body?.email);
-    const password = String(req.body?.password ?? "");
-    const user = await UserModel.findOne({ email }).select("+password").lean();
-    if (!user) {
-      return res.status(404).json({ message: "user does not exist" });
+    const identifier = normalizeString(req.body?.identifier ?? req.body?.email ?? req.body?.phone);
+    const password = typeof req.body?.password === "string" ? req.body.password : "";
+    if (!identifier || !password) {
+      return res.status(400).json({ message: "identifier (email or phone) and password are required" });
+    }
+
+    const user = await findUserByIdentifier(identifier);
+    const validPassword = await comparePassword(password, user?.password ? String(user.password) : await UNUSED_PASSWORD_HASH);
+    if (!user || !user.password || !validPassword) {
+      return res.status(401).json(INVALID_CREDENTIALS);
     }
 
     if (user.disabled) {
       return res.status(403).json({ message: "Account is disabled" });
     }
 
-    if (!user.password) {
-      return res.status(400).json({ message: "This account uses Google Sign-In. Please sign in with Google." });
-    }
-
-    const validPassword = await comparePassword(password, String(user.password));
-    if (!validPassword) {
-      return res.status(404).json({ message: "Password is incorrect" });
-    }
-
-    if (!user.emailVerified) {
+    if (user.email && !user.emailVerified) {
       if (isMailConfigured()) {
         const token = await issueEmailVerificationToken(user._id);
         await sendVerificationEmail({
@@ -145,6 +159,7 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
       message: "login successful",
       data: session.token,
       user: toSafeUser(user),
+      ...platformTokenFields(session.platform),
     });
   } catch (error: any) {
     return res.status(400).json({
@@ -152,6 +167,20 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
       reason: error?.message || "Unknown error",
     });
   }
+};
+
+// POST /token/refresh { refreshToken } → a new access token and a new refresh token.
+// The old refresh token stops working at once; replaying it later revokes the session.
+export const RefreshPlatformToken = async (req: Request, res: Response) => {
+  res.set("Cache-Control", "no-store");
+  const presented = typeof req.body?.refreshToken === "string" ? req.body.refreshToken.trim() : "";
+  if (!presented) return res.status(400).json({ message: "refreshToken is required" });
+
+  const outcome = await rotateRefreshToken(presented);
+  if (outcome.status !== "ok") {
+    return res.status(401).json({ message: outcome.status === "revoked" ? "session revoked" : "invalid refresh token" });
+  }
+  return res.status(200).json({ success: 1, ...platformTokenFields(outcome.tokens) });
 };
 
 export const VerifyEmail = async (req: Request, res: Response) => {
@@ -175,27 +204,22 @@ export const ResendVerificationEmail = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "email is required" });
     }
 
-    const user = await UserModel.findOne({ email }).lean();
-    if (!user) {
-      return res.status(404).json({ message: "user does not exist" });
-    }
-
-    if (user.emailVerified) {
-      return res.status(200).json({ message: "Account is already verified" });
-    }
-
     if (!isMailConfigured()) {
       return res.status(400).json({ message: "Mail transport is not configured" });
     }
 
-    const token = await issueEmailVerificationToken(user._id);
-    await sendVerificationEmail({
-      to: user.email,
-      fullName: user.fullName,
-      verifyUrl: buildVerifyUrl(token),
-    });
+    // Same answer whether or not the account exists or is already verified.
+    const user = await UserModel.findOne({ email }).lean();
+    if (user?.email && !user.emailVerified) {
+      const token = await issueEmailVerificationToken(user._id);
+      await sendVerificationEmail({
+        to: user.email,
+        fullName: user.fullName,
+        verifyUrl: buildVerifyUrl(token),
+      });
+    }
 
-    return res.status(200).json({ message: "Verification email sent" });
+    return res.status(200).json({ message: "If the account exists and is unverified, a verification email has been sent" });
   } catch (error: any) {
     return res.status(400).json({
       message: "Failed to resend verification email",
@@ -211,13 +235,13 @@ export const ForgotPassword = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "email is required" });
     }
 
-    const user = await UserModel.findOne({ email }).lean();
-    if (!user) {
-      return res.status(200).json({ message: "If the account exists, a reset email has been sent" });
-    }
-
     if (!isMailConfigured()) {
       return res.status(400).json({ message: "Mail transport is not configured" });
+    }
+
+    const user = await UserModel.findOne({ email }).lean();
+    if (!user?.email) {
+      return res.status(200).json({ message: "If the account exists, a reset email has been sent" });
     }
 
     const token = await issuePasswordResetToken(user._id);
@@ -530,6 +554,7 @@ export const GoogleLogin = async (req: Request, res: Response) => {
       message: "Google login successful",
       data: session.token,
       user: toSafeUser(user as any),
+      ...platformTokenFields(session.platform),
     });
   } catch (error: any) {
     return res.status(400).json({

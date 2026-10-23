@@ -1,5 +1,5 @@
 import express from "express";
-import { authRateLimiter } from "../Middleware/rateLimiter.js";
+import { authRateLimiter, rateLimiter } from "../Middleware/rateLimiter.js";
 import { verifyToken } from "../Middleware/verifyToken.js";
 import {
   ForgotPassword,
@@ -9,6 +9,7 @@ import {
   LoginUser,
   LogoutAllSessions,
   LogoutUser,
+  RefreshPlatformToken,
   RegisterUser,
   ResendVerificationEmail,
   ResetPassword,
@@ -20,7 +21,15 @@ import {
 
 const router = express.Router();
 
+// Every open tab refreshes about every 15 minutes, so this is far above normal use.
+const refreshRateLimiter = rateLimiter({
+  windowMs: 60 * 1000,
+  limit: 60,
+  message: "Too many refresh requests. Try again later.",
+});
+
 router.post("/register", authRateLimiter, RegisterUser);
+router.post("/token/refresh", refreshRateLimiter, RefreshPlatformToken);
 router.post("/login", authRateLimiter, LoginUser);
 router.post("/google", authRateLimiter, GoogleLogin);
 router.get("/verify-email/:token", VerifyEmail);

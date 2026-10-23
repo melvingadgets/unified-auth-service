@@ -18,6 +18,11 @@ export interface AuthSession {
   logoutAt?: Date;
   lastSeenAt: Date;
   expiresAt: Date;
+  // Refresh tokens (opaque, stored as sha256). Each use replaces the hash; the one
+  // before it is kept briefly so a replayed old token can be told apart (reuse detection).
+  refreshTokenHash?: string | null;
+  previousRefreshTokenHash?: string | null;
+  refreshRotatedAt?: Date | null;
   createdAt?: Date;
   updatedAt?: Date;
 }
@@ -86,9 +91,24 @@ const SessionSchema = new mongoose.Schema<AuthSessionDocument>(
       required: true,
       index: true,
     },
+    refreshTokenHash: {
+      type: String,
+      default: null,
+    },
+    previousRefreshTokenHash: {
+      type: String,
+      default: null,
+    },
+    refreshRotatedAt: {
+      type: Date,
+      default: null,
+    },
   },
   { timestamps: true }
 );
+
+SessionSchema.index({ refreshTokenHash: 1 }, { unique: true, partialFilterExpression: { refreshTokenHash: { $type: "string" } } });
+SessionSchema.index({ previousRefreshTokenHash: 1 }, { partialFilterExpression: { previousRefreshTokenHash: { $type: "string" } } });
 
 SessionSchema.index({ active: 1, expiresAt: 1 });
 SessionSchema.index({ user: 1, active: 1 });

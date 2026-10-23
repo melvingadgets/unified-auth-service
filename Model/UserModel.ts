@@ -1,8 +1,12 @@
 import mongoose from "mongoose";
 import type { AuthApp, AuthRole } from "../types/auth.js";
 
+// A person is identified by email or phone (decision S4, 2026-10-23): at least one is
+// required, each is unique when present, and a phone only signs someone in once verified.
 export interface AuthUser {
-  email: string;
+  email?: string;
+  phone?: string;
+  phoneVerified: boolean;
   password?: string;
   googleId?: string;
   fullName: string;
@@ -28,11 +32,18 @@ const UserSchema = new mongoose.Schema<AuthUserDocument>(
   {
     email: {
       type: String,
-      required: true,
-      unique: true,
       lowercase: true,
       trim: true,
-      index: true,
+    },
+    // E.164, normalised by the platform kit before it gets here.
+    phone: {
+      type: String,
+      trim: true,
+      match: /^\+[1-9]\d{7,14}$/,
+    },
+    phoneVerified: {
+      type: Boolean,
+      default: false,
     },
     password: {
       type: String,
@@ -102,5 +113,17 @@ const UserSchema = new mongoose.Schema<AuthUserDocument>(
   },
   { timestamps: true }
 );
+
+// Unique only where present, so people without one of them don't collide on null.
+UserSchema.index({ email: 1 }, { unique: true, partialFilterExpression: { email: { $type: "string" } } });
+UserSchema.index({ phone: 1 }, { unique: true, partialFilterExpression: { phone: { $type: "string" } } });
+
+UserSchema.pre("validate", function requireIdentifier(next) {
+  if (!this.email && !this.phone) {
+    next(new Error("a person needs an email or a phone number"));
+    return;
+  }
+  next();
+});
 
 export default mongoose.model<AuthUserDocument>("auth_user", UserSchema);

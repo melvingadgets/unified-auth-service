@@ -26,7 +26,9 @@ const routeOf = (req: Request): string =>
 
 // Only identities that were verified by middleware count; headers are never trusted here.
 const callerOf = (req: Request): { type: CallerType; id?: string } => {
-  if (req.service?.id) return { type: "service", id: req.service.id };
+  if (req.caller?.id) return { type: req.caller.type, id: req.caller.id };
+  if (req.service && "id" in req.service) return { type: "service", id: req.service.id };
+  if (req.person?.personId) return { type: "user", id: req.person.personId };
   if (req.user?._id) return { type: "user", id: String(req.user._id) };
   return { type: "anonymous" };
 };
