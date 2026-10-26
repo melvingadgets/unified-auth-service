@@ -17,7 +17,7 @@
     "migrate:refs": "tsx migrations/update-consumer-refs.ts"
   },
   "dependencies": {
-    "@melvingadgets/platform-kit": "0.4.0",
+    "@melvingadgets/platform-kit": "0.5.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

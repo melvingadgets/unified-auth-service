@@ -259,6 +259,8 @@ describe("service-token internal routes", () => {
     const token = await serviceToken("auth", "auth:people.read");
     const byId = await request(app).get(`/api/v1/auth/internal/v2/people/${personId}`).set("authorization", `Bearer ${token}`);
     expect(byId.body).toMatchObject({ personId, email: "lookup@example.com", phone: "+2348025550000", phoneVerified: true });
+    // The reseller service's "new people only" rule needs when the account was created.
+    expect(Number.isNaN(Date.parse(byId.body.createdAt))).toBe(false);
     const byPhone = await request(app)
       .post("/api/v1/auth/internal/v2/people/lookup")
       .set("authorization", `Bearer ${token}`)
@@ -269,6 +271,23 @@ describe("service-token internal routes", () => {
       .set("authorization", `Bearer ${token}`)
       .send({ email: "nobody@example.com" });
     expect(missing.status).toBe(404);
+  });
+});
+
+describe("reseller service client (RESELLER-PLAN.md §13)", () => {
+  const issue = (audience: string, scope: string) =>
+    request(app)
+      .post("/oauth/token")
+      .set("authorization", basic("svc-reseller", TEST_CLIENT_SECRETS.reseller))
+      .type("form")
+      .send({ grant_type: "client_credentials", audience, scope });
+
+  it("gets tokens only for its read-only grants", async () => {
+    expect((await issue("auth", "auth:people.read")).status).toBe(200);
+    expect((await issue("easybuy", "easybuy:journey.read")).status).toBe(200);
+    expect((await issue("store", "store:orders.read")).status).toBe(200);
+    expect((await issue("auth", "auth:sessions.check")).status).not.toBe(200);
+    expect((await issue("easybuy", "easybuy:financing.create")).status).not.toBe(200);
   });
 });
 

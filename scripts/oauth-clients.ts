@@ -19,7 +19,7 @@ type Client = { clientId: string; service: string; secretHash: string };
 
 const [outDir, ...services] = process.argv.slice(2);
 if (!outDir || services.length === 0 || !services.every(isServiceId)) {
-  console.error("usage: tsx scripts/oauth-clients.ts <out-dir> <service> [...]; services: auth easybuy store market relay gateway");
+  console.error("usage: tsx scripts/oauth-clients.ts <out-dir> <service> [...]; services: auth easybuy store market relay gateway reseller");
   process.exit(1);
 }
 

@@ -16,6 +16,7 @@ const toPerson = (user: {
   disabled: boolean;
   emailVerified: boolean;
   phoneVerified?: boolean;
+  createdAt?: Date | null;
 }) => ({
   personId: String(user._id),
   email: user.email || null,
@@ -25,6 +26,9 @@ const toPerson = (user: {
   disabled: user.disabled,
   emailVerified: user.emailVerified,
   phoneVerified: Boolean(user.phoneVerified),
+  // Added (optional, additive): the reseller service only links people whose account was
+  // created after they opened a reseller's link (RESELLER-PLAN.md R2).
+  createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : null,
 });
 
 // A session is usable when it's active and unexpired; receivers cache the answer briefly.
