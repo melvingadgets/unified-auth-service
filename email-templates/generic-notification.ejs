@@ -1,4 +1,9 @@
 <%- include('./partials/header') %>
+<% 
+  const effectiveUrl = (typeof ctaUrl !== 'undefined' && ctaUrl) ? ctaUrl : (typeof actionUrl !== 'undefined' && actionUrl) ? actionUrl : '';
+  const effectiveText = (typeof ctaText !== 'undefined' && ctaText) ? ctaText : (typeof actionText !== 'undefined' && actionText) ? actionText : 'View Details';
+  const effectiveNote = (typeof note !== 'undefined' && note) ? note : (typeof footerNote !== 'undefined' && footerNote) ? footerNote : '';
+%>
 
 <p class="text-lg"><%= typeof title !== 'undefined' && title ? title : 'Notification' %></p>
 <% if (typeof subtitle !== 'undefined' && subtitle) { %>
@@ -24,14 +29,14 @@
   </table>
 <% } %>
 
-<% if (typeof ctaUrl !== 'undefined' && ctaUrl) { %>
+<% if (effectiveUrl) { %>
   <div style="text-align: center;">
-    <a href="<%= ctaUrl %>" class="btn"><%= typeof ctaText !== 'undefined' && ctaText ? ctaText : 'View Details' %></a>
+    <a href="<%= effectiveUrl %>" class="btn"><%= effectiveText %></a>
   </div>
 <% } %>
 
-<% if (typeof note !== 'undefined' && note) { %>
-  <p class="regular-text" style="font-size: 13px; color: #888888;"><%= note %></p>
+<% if (effectiveNote) { %>
+  <p class="regular-text" style="font-size: 13px; color: #888888;"><%= effectiveNote %></p>
 <% } %>
 
 <%- include('./partials/footer') %>

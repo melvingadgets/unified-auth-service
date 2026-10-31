@@ -97,7 +97,8 @@ export const renderEmailTemplate = async (
   templateName: string,
   data: Record<string, unknown> = {}
 ): Promise<string> => {
-  const safeName = templateName.endsWith(".ejs") ? templateName : `${templateName}.ejs`;
+  const baseName = path.basename(templateName).replace(/\.ejs$/, "");
+  const safeName = `${baseName}.ejs`;
   const templatePath = resolveTemplatePath(safeName);
   return await ejs.renderFile(templatePath, data);
 };

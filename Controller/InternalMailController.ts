@@ -11,8 +11,9 @@ const isValidEmail = (email: string): boolean => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.te
 export const InternalSendMail = async (req: Request, res: Response) => {
   const to = String(req.body?.to || "").trim();
   const subject = String(req.body?.subject || "").trim();
-  const template = req.body?.template ? String(req.body.template).trim() : undefined;
-  const data = typeof req.body?.data === "object" && req.body?.data !== null ? req.body.data : {};
+  let template = req.body?.template ? String(req.body.template).trim() : undefined;
+  const rawData = req.body?.data || req.body?.context || {};
+  const data = typeof rawData === "object" && rawData !== null ? rawData : {};
   let html = typeof req.body?.html === "string" ? req.body.html : undefined;
   const text = typeof req.body?.text === "string" ? req.body.text : undefined;
 
@@ -29,6 +30,17 @@ export const InternalSendMail = async (req: Request, res: Response) => {
       message: "Either 'template' or 'html' must be provided",
       availableTemplates: AVAILABLE_TEMPLATES,
     });
+  }
+
+  if (template) {
+    const cleanTemplate = template.replace(/\.ejs$/, "");
+    if (!AVAILABLE_TEMPLATES.includes(cleanTemplate as any)) {
+      return res.status(400).json({
+        message: `Failed to render email template '${template}': Invalid template`,
+        availableTemplates: AVAILABLE_TEMPLATES,
+      });
+    }
+    template = cleanTemplate;
   }
 
   try {
