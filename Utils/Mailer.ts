@@ -1,18 +1,32 @@
 import nodemailer from "nodemailer";
 import { Resend } from "resend";
 import ejs from "ejs";
+import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
 import { config } from "../config/Config.js";
+import { isMailConfigured } from "./authHelpers.js";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-const canSendMail = Boolean(
-  config.mail.from &&
-    ((config.mail.provider === "smtp" && config.mail.smtp.gmailUser && config.mail.smtp.gmailAppPassword) ||
-      (config.mail.provider === "resend" && config.mail.resend.apiKey))
-);
+// One definition, imported: a second copy of this rule is how the two drifted apart before
+// (2026-10-30, when a placeholder key passed the presence check).
+export const canSendMail = isMailConfigured();
+
+export const AVAILABLE_TEMPLATES = [
+  "verification",
+  "reset-password",
+  "generic-notification",
+  "easybuy-loan-approved",
+  "easybuy-receipt-approved",
+  "store-order-receipt",
+  "invoice-ready",
+  "reseller-commission",
+  "reseller-payout",
+] as const;
+
+export type EmailTemplateName = (typeof AVAILABLE_TEMPLATES)[number] | (string & {});
 
 const resendClient =
   config.mail.provider === "resend" && config.mail.resend.apiKey
@@ -33,7 +47,7 @@ const getTransporter = () => {
   });
 };
 
-const sendHtmlEmail = async (args: { to: string; subject: string; html: string }) => {
+export const sendCustomEmail = async (args: { to: string; subject: string; html: string; text?: string }) => {
   if (!canSendMail) {
     throw new Error("Mail transport is not configured");
   }
@@ -44,23 +58,62 @@ const sendHtmlEmail = async (args: { to: string; subject: string; html: string }
       to: args.to,
       subject: args.subject,
       html: args.html,
+      ...(args.text ? { text: args.text } : {}),
     });
-    
+
     if (error) {
       console.error("Resend Error:", error);
       throw new Error(`Resend failed: ${error.message}`);
     }
+    return data;
   } else {
     const transporter = getTransporter();
     if (transporter) {
-      await transporter.sendMail({
+      return await transporter.sendMail({
         from: config.mail.from,
         to: args.to,
         subject: args.subject,
         html: args.html,
+        ...(args.text ? { text: args.text } : {}),
       });
     }
   }
+};
+
+const resolveTemplatePath = (safeName: string): string => {
+  const candidates = [
+    path.join(__dirname, "../email-templates", safeName),
+    path.join(__dirname, "../../email-templates", safeName),
+    path.resolve(process.cwd(), "email-templates", safeName),
+    path.resolve(process.cwd(), "unified-auth-service/email-templates", safeName),
+  ];
+  for (const c of candidates) {
+    if (fs.existsSync(c)) return c;
+  }
+  return candidates[0];
+};
+
+export const renderEmailTemplate = async (
+  templateName: string,
+  data: Record<string, unknown> = {}
+): Promise<string> => {
+  const safeName = templateName.endsWith(".ejs") ? templateName : `${templateName}.ejs`;
+  const templatePath = resolveTemplatePath(safeName);
+  return await ejs.renderFile(templatePath, data);
+};
+
+export const sendTemplateEmail = async (args: {
+  to: string;
+  subject: string;
+  template: EmailTemplateName;
+  data?: Record<string, unknown>;
+}) => {
+  const html = await renderEmailTemplate(args.template, args.data || {});
+  return await sendCustomEmail({
+    to: args.to,
+    subject: args.subject,
+    html,
+  });
 };
 
 export const sendVerificationEmail = async (args: {
@@ -68,16 +121,14 @@ export const sendVerificationEmail = async (args: {
   fullName: string;
   verifyUrl: string;
 }) => {
-  const templatePath = path.join(__dirname, "../email-templates/verification.ejs");
-  const html = await ejs.renderFile(templatePath, {
-    fullName: args.fullName,
-    verifyUrl: args.verifyUrl,
-  });
-
-  await sendHtmlEmail({
+  return await sendTemplateEmail({
     to: args.to,
-    subject: `Verify your Melvin Gadgets account`,
-    html,
+    subject: "Verify your Melvin Gadgets account",
+    template: "verification",
+    data: {
+      fullName: args.fullName,
+      verifyUrl: args.verifyUrl,
+    },
   });
 };
 
@@ -86,15 +137,13 @@ export const sendResetPasswordEmail = async (args: {
   fullName: string;
   resetUrl: string;
 }) => {
-  const templatePath = path.join(__dirname, "../email-templates/reset-password.ejs");
-  const html = await ejs.renderFile(templatePath, {
-    fullName: args.fullName,
-    resetUrl: args.resetUrl,
-  });
-
-  await sendHtmlEmail({
+  return await sendTemplateEmail({
     to: args.to,
     subject: "Reset your password",
-    html,
+    template: "reset-password",
+    data: {
+      fullName: args.fullName,
+      resetUrl: args.resetUrl,
+    },
   });
 };

@@ -1,0 +1,47 @@
+<%- include('./partials/header') %>
+
+<p class="text-lg">Document Ready</p>
+<p class="text-md text-color">Hello <%= typeof customerName !== 'undefined' && customerName ? customerName : '' %></p>
+
+<p class="regular-text">
+  Your official financial document from Melvin Gadgets has been generated and is ready for download.
+</p>
+
+<table class="info-table">
+  <tbody>
+    <% if (typeof invoiceNumber !== 'undefined' && invoiceNumber) { %>
+      <tr>
+        <td class="label">Document No.</td>
+        <td class="val"><%= invoiceNumber %></td>
+      </tr>
+    <% } %>
+    <% if (typeof kindLabel !== 'undefined' && kindLabel) { %>
+      <tr>
+        <td class="label">Category</td>
+        <td class="val"><%= kindLabel %></td>
+      </tr>
+    <% } %>
+    <% if (typeof totalAmount !== 'undefined' && totalAmount) { %>
+      <tr>
+        <td class="label">Amount</td>
+        <td class="val"><%= totalAmount %></td>
+      </tr>
+    <% } %>
+    <% if (typeof issueDate !== 'undefined' && issueDate) { %>
+      <tr>
+        <td class="label">Date of Issue</td>
+        <td class="val"><%= issueDate %></td>
+      </tr>
+    <% } %>
+  </tbody>
+</table>
+
+<div style="text-align: center;">
+  <a href="<%= typeof documentUrl !== 'undefined' && documentUrl ? documentUrl : 'https://melvin-os-pink.vercel.app' %>" class="btn">View & Download PDF</a>
+</div>
+
+<p class="regular-text">
+  To access this document and download your official PDF, sign in to your Melvin OS Profile and open the Documents tab.
+</p>
+
+<%- include('./partials/footer') %>

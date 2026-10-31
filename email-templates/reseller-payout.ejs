@@ -1,0 +1,47 @@
+<%- include('./partials/header') %>
+
+<p class="text-lg">Payout Processed</p>
+<p class="text-md text-color">Hello <%= typeof resellerName !== 'undefined' && resellerName ? resellerName : 'Partner' %></p>
+
+<p class="regular-text">
+  Your weekly reseller payout batch has been processed and sent to your registered bank account.
+</p>
+
+<table class="info-table">
+  <tbody>
+    <% if (typeof payoutAmount !== 'undefined' && payoutAmount) { %>
+      <tr>
+        <td class="label">Amount Paid</td>
+        <td class="val"><%= payoutAmount %></td>
+      </tr>
+    <% } %>
+    <% if (typeof batchReference !== 'undefined' && batchReference) { %>
+      <tr>
+        <td class="label">Batch Reference</td>
+        <td class="val"><%= batchReference %></td>
+      </tr>
+    <% } %>
+    <% if (typeof bankName !== 'undefined' && bankName) { %>
+      <tr>
+        <td class="label">Destination Bank</td>
+        <td class="val"><%= bankName %></td>
+      </tr>
+    <% } %>
+    <% if (typeof payoutDate !== 'undefined' && payoutDate) { %>
+      <tr>
+        <td class="label">Date</td>
+        <td class="val"><%= payoutDate %></td>
+      </tr>
+    <% } %>
+  </tbody>
+</table>
+
+<div style="text-align: center;">
+  <a href="<%= typeof resellerUrl !== 'undefined' && resellerUrl ? resellerUrl : 'https://melvin-os-pink.vercel.app' %>" class="btn">View Payout Statement</a>
+</div>
+
+<p class="regular-text">
+  Depending on interbank settlement times, funds will reflect in your account within a few minutes to hours.
+</p>
+
+<%- include('./partials/footer') %>

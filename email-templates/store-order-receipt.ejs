@@ -1,0 +1,41 @@
+<%- include('./partials/header') %>
+
+<p class="text-lg">Order Confirmed</p>
+<p class="text-md text-color">Thank you <%= typeof customerName !== 'undefined' && customerName ? customerName : '' %></p>
+
+<p class="regular-text">
+  We have received your order on Melvin Gadgets Store! Our logistics team is preparing your package for dispatch.
+</p>
+
+<table class="info-table">
+  <tbody>
+    <% if (typeof orderId !== 'undefined' && orderId) { %>
+      <tr>
+        <td class="label">Order Reference</td>
+        <td class="val">#<%= orderId %></td>
+      </tr>
+    <% } %>
+    <% if (typeof totalAmount !== 'undefined' && totalAmount) { %>
+      <tr>
+        <td class="label">Total Paid</td>
+        <td class="val"><%= totalAmount %></td>
+      </tr>
+    <% } %>
+    <% if (typeof deliveryAddress !== 'undefined' && deliveryAddress) { %>
+      <tr>
+        <td class="label">Delivery Address</td>
+        <td class="val"><%= deliveryAddress %></td>
+      </tr>
+    <% } %>
+  </tbody>
+</table>
+
+<div style="text-align: center;">
+  <a href="<%= typeof orderUrl !== 'undefined' && orderUrl ? orderUrl : 'https://melvin-os-pink.vercel.app' %>" class="btn">Track Your Order</a>
+</div>
+
+<p class="regular-text">
+  You will receive a notification as soon as your package has been handed over to the courier.
+</p>
+
+<%- include('./partials/footer') %>

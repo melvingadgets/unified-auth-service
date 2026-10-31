@@ -1,0 +1,37 @@
+<%- include('./partials/header') %>
+
+<p class="text-lg"><%= typeof title !== 'undefined' && title ? title : 'Notification' %></p>
+<% if (typeof subtitle !== 'undefined' && subtitle) { %>
+  <p class="text-md text-color"><%= subtitle %></p>
+<% } else if (typeof userName !== 'undefined' && userName) { %>
+  <p class="text-md text-color">Hello <%= userName %>,</p>
+<% } %>
+
+<% if (typeof message !== 'undefined' && message) { %>
+  <p class="regular-text"><%= message %></p>
+<% } %>
+
+<% if (typeof items !== 'undefined' && Array.isArray(items) && items.length > 0) { %>
+  <table class="info-table">
+    <tbody>
+      <% items.forEach(function(item) { %>
+        <tr>
+          <td class="label"><%= item.label %></td>
+          <td class="val"><%= item.value %></td>
+        </tr>
+      <% }); %>
+    </tbody>
+  </table>
+<% } %>
+
+<% if (typeof ctaUrl !== 'undefined' && ctaUrl) { %>
+  <div style="text-align: center;">
+    <a href="<%= ctaUrl %>" class="btn"><%= typeof ctaText !== 'undefined' && ctaText ? ctaText : 'View Details' %></a>
+  </div>
+<% } %>
+
+<% if (typeof note !== 'undefined' && note) { %>
+  <p class="regular-text" style="font-size: 13px; color: #888888;"><%= note %></p>
+<% } %>
+
+<%- include('./partials/footer') %>

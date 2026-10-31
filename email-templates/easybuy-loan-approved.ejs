@@ -1,0 +1,47 @@
+<%- include('./partials/header') %>
+
+<p class="text-lg">Financing Approved!</p>
+<p class="text-md text-color">Congratulations <%= typeof customerName !== 'undefined' && customerName ? customerName : '' %></p>
+
+<p class="regular-text">
+  Great news! Your EasyBuy device financing application has been approved. Your payment plan is now active.
+</p>
+
+<table class="info-table">
+  <tbody>
+    <% if (typeof deviceModel !== 'undefined' && deviceModel) { %>
+      <tr>
+        <td class="label">Device</td>
+        <td class="val"><%= deviceModel %></td>
+      </tr>
+    <% } %>
+    <% if (typeof plan !== 'undefined' && plan) { %>
+      <tr>
+        <td class="label">Repayment Plan</td>
+        <td class="val"><%= plan %></td>
+      </tr>
+    <% } %>
+    <% if (typeof downPayment !== 'undefined' && downPayment) { %>
+      <tr>
+        <td class="label">Down Payment</td>
+        <td class="val"><%= downPayment %></td>
+      </tr>
+    <% } %>
+    <% if (typeof financedAmount !== 'undefined' && financedAmount) { %>
+      <tr>
+        <td class="label">Financed Balance</td>
+        <td class="val"><%= financedAmount %></td>
+      </tr>
+    <% } %>
+  </tbody>
+</table>
+
+<div style="text-align: center;">
+  <a href="<%= typeof dashboardUrl !== 'undefined' && dashboardUrl ? dashboardUrl : 'https://aurapaytracker.vercel.app/dashboard' %>" class="btn">View Your Loan Schedule</a>
+</div>
+
+<p class="regular-text">
+  You can track your upcoming repayment dates and upload bank proof of payment directly inside your EasyBuy customer dashboard.
+</p>
+
+<%- include('./partials/footer') %>

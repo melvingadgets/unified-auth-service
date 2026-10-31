@@ -1,0 +1,41 @@
+<%- include('./partials/header') %>
+
+<p class="text-lg">Payment Confirmed</p>
+<p class="text-md text-color">Hello <%= typeof customerName !== 'undefined' && customerName ? customerName : '' %></p>
+
+<p class="regular-text">
+  Your payment receipt has been verified and credited to your EasyBuy financing account.
+</p>
+
+<table class="info-table">
+  <tbody>
+    <% if (typeof amount !== 'undefined' && amount) { %>
+      <tr>
+        <td class="label">Amount Paid</td>
+        <td class="val"><%= amount %></td>
+      </tr>
+    <% } %>
+    <% if (typeof paymentDate !== 'undefined' && paymentDate) { %>
+      <tr>
+        <td class="label">Approval Date</td>
+        <td class="val"><%= paymentDate %></td>
+      </tr>
+    <% } %>
+    <% if (typeof remainingBalance !== 'undefined' && remainingBalance) { %>
+      <tr>
+        <td class="label">Remaining Balance</td>
+        <td class="val"><%= remainingBalance %></td>
+      </tr>
+    <% } %>
+  </tbody>
+</table>
+
+<div style="text-align: center;">
+  <a href="<%= typeof dashboardUrl !== 'undefined' && dashboardUrl ? dashboardUrl : 'https://aurapaytracker.vercel.app/dashboard' %>" class="btn">View Receipts History</a>
+</div>
+
+<p class="regular-text">
+  An official financial document / receipt has also been recorded in your Melvin OS Profile Documents.
+</p>
+
+<%- include('./partials/footer') %>
