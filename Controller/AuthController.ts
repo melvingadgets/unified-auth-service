@@ -223,10 +223,13 @@ export const VerifyEmail = async (req: Request, res: Response) => {
 
   const user = await consumeEmailVerificationToken(token);
   if (!user) {
-    return res.status(400).send("<h1>Verification link is invalid or expired</h1>");
+    // Signing in to an unverified account e-mails a fresh link (LoginUser), so say so.
+    return res
+      .status(400)
+      .send("<h1>Verification link is invalid or expired</h1><p>Sign in again and we will e-mail you a new link.</p>");
   }
 
-  return res.status(200).send("<h1>Account has been verified</h1>");
+  return res.status(200).send("<h1>Account has been verified</h1><p>You can close this page and sign in.</p>");
 };
 
 export const ResendVerificationEmail = async (req: Request, res: Response) => {

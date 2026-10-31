@@ -320,12 +320,21 @@ export const buildDeviceInfo = (req: Request, input?: Record<string, unknown>) =
   os: String(input?.os ?? "").trim(),
 });
 
+// A verification link is good for a day, and sending another e-mail does not void the earlier ones:
+// people open whichever copy is on top, often on another device. On 2026-10-31 a sign-in attempt
+// re-sent the e-mail, the new token overwrote the old one, and the link the person then tapped
+// answered "invalid or expired" (test/emailVerification.test.ts replays it).
+export const EMAIL_VERIFICATION_TTL_MS = 24 * 60 * 60 * 1000;
+export const MAX_EMAIL_VERIFICATION_TOKENS = 5;
+
 export const issueEmailVerificationToken = async (userId: string | mongoose.Types.ObjectId) => {
   const token = generateOpaqueToken();
   await UserModel.findByIdAndUpdate(userId, {
-    $set: {
-      emailVerificationTokenHash: hashToken(token),
-      emailVerificationTokenExpiresAt: new Date(Date.now() + 60 * 60 * 1000),
+    $push: {
+      emailVerificationTokens: {
+        $each: [{ hash: hashToken(token), expiresAt: new Date(Date.now() + EMAIL_VERIFICATION_TTL_MS) }],
+        $slice: -MAX_EMAIL_VERIFICATION_TOKENS,
+      },
     },
   });
   return token;
@@ -342,23 +351,24 @@ export const issuePasswordResetToken = async (userId: string | mongoose.Types.Ob
   return token;
 };
 
-export const consumeEmailVerificationToken = async (token: string) =>
-  UserModel.findOneAndUpdate(
+// Repeatable: tokens stay until they expire, so opening a link a second time (a double tap, or a
+// mail scanner fetching it first) still answers "verified" instead of "invalid". A token can only
+// ever set emailVerified on the account it was issued to.
+export const consumeEmailVerificationToken = async (token: string) => {
+  const hash = hashToken(token);
+  const now = new Date();
+  return UserModel.findOneAndUpdate(
     {
-      emailVerificationTokenHash: hashToken(token),
-      emailVerificationTokenExpiresAt: { $gt: new Date() },
+      $or: [
+        { emailVerificationTokens: { $elemMatch: { hash, expiresAt: { $gt: now } } } },
+        // A link mailed before 2026-11-01 sits in the legacy single field until it expires.
+        { emailVerificationTokenHash: hash, emailVerificationTokenExpiresAt: { $gt: now } },
+      ],
     },
-    {
-      $set: {
-        emailVerified: true,
-      },
-      $unset: {
-        emailVerificationTokenHash: 1,
-        emailVerificationTokenExpiresAt: 1,
-      },
-    },
+    { $set: { emailVerified: true } },
     { returnDocument: "after" }
   ).lean();
+};
 
 export const consumePasswordResetToken = async (token: string, nextPasswordHash: string) =>
   UserModel.findOneAndUpdate(

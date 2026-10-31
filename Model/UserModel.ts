@@ -21,6 +21,9 @@ export interface AuthUser {
     easybuy?: string;
     ecommerce?: string;
   };
+  /** One per verification e-mail sent (hash only), oldest first. */
+  emailVerificationTokens?: Array<{ hash: string; expiresAt: Date }>;
+  /** Legacy single token: links mailed before 2026-11-01 are read from here until they expire. */
   emailVerificationTokenHash?: string | null;
   emailVerificationTokenExpiresAt?: Date | null;
   passwordResetTokenHash?: string | null;
@@ -104,6 +107,21 @@ const UserSchema = new mongoose.Schema<AuthUserDocument>(
         sparse: true,
         index: true,
       },
+    },
+    // Every verification link still in someone's inbox stays good until its own expiry: issuing a
+    // new one used to overwrite the single hash below, so the link in each earlier e-mail stopped
+    // working (2026-10-31, from production). Capped in authHelpers.issueEmailVerificationToken.
+    // Entries are left in place after verifying, so a flow that ever changes `email` must clear them.
+    emailVerificationTokens: {
+      type: [
+        {
+          _id: false,
+          hash: { type: String, required: true },
+          expiresAt: { type: Date, required: true },
+        },
+      ],
+      default: undefined,
+      select: false,
     },
     emailVerificationTokenHash: {
       type: String,
