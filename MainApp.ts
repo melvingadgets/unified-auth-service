@@ -7,6 +7,7 @@ import OAuthRouter from "./Router/OAuthRouter.js";
 import PlatformInternalRouter from "./Router/PlatformInternalRouter.js";
 import { requestLog } from "./Middleware/requestLog.js";
 import { config } from "./config/Config.js";
+import { buildPlatformCorsOptions } from "./Utils/corsHelper.js";
 
 export const MainApp = (app: Application) => {
   // Railway terminates TLS in one proxy hop; without this every client shares the proxy's IP.
@@ -14,11 +15,7 @@ export const MainApp = (app: Application) => {
   app.use(requestLog("auth"));
   app.use(express.json());
 
-  const corsOptions: cors.CorsOptions = {
-    origin: config.corsOrigins.length > 0 ? config.corsOrigins : "*",
-    credentials: true,
-  };
-  app.use(cors(corsOptions));
+  app.use(cors(buildPlatformCorsOptions(config.corsOrigins)));
 
   app.get("/health", (_req, res) => {
     res.status(200).json({ status: "ok" });
