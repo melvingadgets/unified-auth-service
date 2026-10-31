@@ -7,6 +7,17 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.join(__dirname, "../.env") });
 
+// The role copied across used to be whatever the legacy row held, spelling included.
+// Map it through the one normaliser (it lowercases and accepts User/Admin/SuperAdmin),
+// and refuse anything else rather than importing a role auth would later reject.
+const mapLegacyRole = (role: unknown): "User" | "Admin" | "SuperAdmin" => {
+  const normalized = String(role ?? "").trim().toLowerCase();
+  if (normalized === "superadmin") return "SuperAdmin";
+  if (normalized === "admin") return "Admin";
+  if (normalized === "user" || normalized === "") return "User";
+  throw new Error(`EasyBuy user has an unrecognised role: ${JSON.stringify(role)}`);
+};
+
 const EASYBUY_DB_URL = String(process.env.EASYBUY_DATABASE_URL ?? "").trim();
 const AUTH_DB_URL = String(process.env.DATABASE_URL ?? "").trim();
 
@@ -83,7 +94,7 @@ const runMigration = async () => {
         email: email,
         password: oldUser.password, // Exact hash copy
         fullName: oldUser.fullName || "Easybuy User",
-        role: oldUser.role || "User",
+        role: mapLegacyRole(oldUser.role),
         emailVerified: true, // Legacy users are considered verified
         disabled: false,
         originApp: "easybuy",

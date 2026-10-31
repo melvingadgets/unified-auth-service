@@ -21,24 +21,43 @@ if (!easybuyDatabaseUrl || !ecommerceDatabaseUrl) {
   throw new Error("EASYBUY_DATABASE_URL and ECOMMERCE_DATABASE_URL are required");
 }
 
-const rankRole = (role: string) => {
-  const normalized = role.toLowerCase();
+/**
+ * Unknown roles do not exist: a value the source service never issued is a data
+ * defect, and silently defaulting it to `User` would quietly demote a real admin.
+ * Every mapper throws instead, naming the value, so the migration stops rather than
+ * guessing (AGENTS.md §7.3 — a migration reports before/after, it doesn't invent).
+ */
+const unmappedRole = (service: string, value: unknown): never => {
+  throw new Error(`${service} user has an unrecognised role: ${JSON.stringify(value)}`);
+};
+
+const rankRole = (role: unknown): number => {
+  const normalized = String(role ?? "").trim().toLowerCase();
   if (normalized === "superadmin") return 3;
   if (normalized === "admin") return 2;
-  return 1;
+  if (normalized === "user" || normalized === "") return 1;
+  throw new Error(`unrecognised role in auth: ${JSON.stringify(role)}`);
 };
 
 const mapEasyBuyRole = (role: unknown): "User" | "Admin" | "SuperAdmin" => {
   const normalized = String(role ?? "").trim().toLowerCase();
   if (normalized === "superadmin") return "SuperAdmin";
   if (normalized === "admin") return "Admin";
-  return "User";
+  if (normalized === "user" || normalized === "") return "User";
+  return unmappedRole("EasyBuy", role);
 };
 
-const mapEcommerceRole = (role: unknown): "User" | "Admin" => {
+/**
+ * A store `superadmin` is a SuperAdmin — this used to return `"Admin"`, and the caller's
+ * `rankRole` comparison then kept whichever was lower, so every store SuperAdmin was
+ * demoted on import. `storeowner` was the store's name for an admin.
+ */
+const mapEcommerceRole = (role: unknown): "User" | "Admin" | "SuperAdmin" => {
   const normalized = String(role ?? "").trim().toLowerCase();
-  if (normalized === "admin" || normalized === "storeowner" || normalized === "superadmin") return "Admin";
-  return "User";
+  if (normalized === "superadmin") return "SuperAdmin";
+  if (normalized === "admin" || normalized === "storeowner") return "Admin";
+  if (normalized === "user" || normalized === "") return "User";
+  return unmappedRole("ecommerce", role);
 };
 
 const buildProfileUpdate = (profile: AnyDoc | null | undefined, fullName: string) => {

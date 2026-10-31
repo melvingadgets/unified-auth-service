@@ -5,7 +5,7 @@
   "main": "dist/Server.js",
   "type": "module",
   "scripts": {
-    "build": "tsc",
+    "build": "tsc && node -e \"const fs=require('fs'); if(fs.existsSync('email-templates')) fs.cpSync('email-templates', 'dist/email-templates', { recursive: true, force: true });\"",
     "start": "node dist/Server.js",
     "dev": "tsx watch Server.ts",
     "test": "vitest run",
@@ -14,10 +14,11 @@
     "migrate:easybuy": "tsx scripts/migrate-easybuy.ts",
     "migrate:users": "tsx migrations/migrate-users.ts",
     "migrate:sessions": "tsx migrations/migrate-sessions.ts",
-    "migrate:refs": "tsx migrations/update-consumer-refs.ts"
+    "migrate:refs": "tsx migrations/update-consumer-refs.ts",
+    "migrate:staff-roles": "tsx scripts/migrate-staff-roles.ts"
   },
   "dependencies": {
-    "@melvingadgets/platform-kit": "0.5.0",
+    "@melvingadgets/platform-kit": "0.6.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",

@@ -30,6 +30,23 @@ import {
 const normalizeEmail = (value: unknown): string => String(value ?? "").trim().toLowerCase();
 const normalizeString = (value: unknown): string => String(value ?? "").trim();
 
+/**
+ * A mail send failed. One JSON line, same shape as the request log (AGENTS.md §6), with the
+ * personId — NEVER the email address, the token or the URL (AGENTS.md §6.3).
+ */
+const logMailFailure = (event: string, personId: unknown, error: unknown): void => {
+  process.stdout.write(
+    `${JSON.stringify({
+      time: new Date().toISOString(),
+      level: "warn",
+      svc: "auth",
+      event,
+      personId: personId ? String(personId) : null,
+      message: error instanceof Error ? error.message : String(error),
+    })}\n`,
+  );
+};
+
 export const RegisterUser = async (req: Request, res: Response) => {
   try {
     const fullName = normalizeString(req.body?.fullName);
@@ -59,12 +76,20 @@ export const RegisterUser = async (req: Request, res: Response) => {
       verificationRequired = false;
       await UserModel.findByIdAndUpdate(user._id, { $set: { emailVerified: true } });
     } else {
-      const token = await issueEmailVerificationToken(user._id);
-      await sendVerificationEmail({
-        to: email,
-        fullName,
-        verifyUrl: buildVerifyUrl(token),
-      });
+      // The account EXISTS by now. A mail failure is a mail failure: reporting it as
+      // "unable to create user" left the person locked out of a row they could neither use nor
+      // recreate — and would have made the reseller claim that follows sign-up point at nobody.
+      // The person can verify later through /resend-verification once mail works.
+      try {
+        const token = await issueEmailVerificationToken(user._id);
+        await sendVerificationEmail({
+          to: email,
+          fullName,
+          verifyUrl: buildVerifyUrl(token),
+        });
+      } catch (error) {
+        logMailFailure("verification_email_failed", user._id, error);
+      }
     }
 
     return res.status(201).json({
@@ -128,12 +153,18 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
 
     if (user.email && !user.emailVerified) {
       if (isMailConfigured()) {
-        const token = await issueEmailVerificationToken(user._id);
-        await sendVerificationEmail({
-          to: user.email,
-          fullName: user.fullName,
-          verifyUrl: buildVerifyUrl(token),
-        });
+        // Best-effort re-send. If it fails the person must still get the 403 that tells them what
+        // is wrong, not a 500 from a mail provider.
+        try {
+          const token = await issueEmailVerificationToken(user._id);
+          await sendVerificationEmail({
+            to: user.email,
+            fullName: user.fullName,
+            verifyUrl: buildVerifyUrl(token),
+          });
+        } catch (error) {
+          logMailFailure("verification_resend_failed", user._id, error);
+        }
       }
       return res.status(403).json({ message: "please check your email to verify account" });
     }
@@ -144,6 +175,7 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        domainRoles: user.domainRoles,
       },
       device: buildDeviceInfo(req, req.body?.device),
     });
@@ -211,12 +243,16 @@ export const ResendVerificationEmail = async (req: Request, res: Response) => {
     // Same answer whether or not the account exists or is already verified.
     const user = await UserModel.findOne({ email }).lean();
     if (user?.email && !user.emailVerified) {
-      const token = await issueEmailVerificationToken(user._id);
-      await sendVerificationEmail({
-        to: user.email,
-        fullName: user.fullName,
-        verifyUrl: buildVerifyUrl(token),
-      });
+      try {
+        const token = await issueEmailVerificationToken(user._id);
+        await sendVerificationEmail({
+          to: user.email,
+          fullName: user.fullName,
+          verifyUrl: buildVerifyUrl(token),
+        });
+      } catch (error) {
+        logMailFailure("verification_resend_failed", user._id, error);
+      }
     }
 
     return res.status(200).json({ message: "If the account exists and is unverified, a verification email has been sent" });
@@ -244,12 +280,18 @@ export const ForgotPassword = async (req: Request, res: Response) => {
       return res.status(200).json({ message: "If the account exists, a reset email has been sent" });
     }
 
-    const token = await issuePasswordResetToken(user._id);
-    await sendResetPasswordEmail({
-      to: user.email,
-      fullName: user.fullName,
-      resetUrl: buildResetUrl(token),
-    });
+    // Both branches answer 200 alike — that equality is what stops this route revealing whether an
+    // account exists, so a mail failure is logged and swallowed here too.
+    try {
+      const token = await issuePasswordResetToken(user._id);
+      await sendResetPasswordEmail({
+        to: user.email,
+        fullName: user.fullName,
+        resetUrl: buildResetUrl(token),
+      });
+    } catch (error) {
+      logMailFailure("password_reset_email_failed", user._id, error);
+    }
 
     return res.status(200).json({ message: "If the account exists, a reset email has been sent" });
   } catch (error: any) {
@@ -427,24 +469,31 @@ export const UpdateMyProfile = async (req: Request, res: Response) => {
     return res.status(404).json({ message: "User not found" });
   }
 
-  const fullName = normalizeString(req.body?.fullName) || user.fullName;
-  user.fullName = fullName;
-  await user.save();
+  // A partial save must not wipe the fields it does not mention. `normalizeString` turns an
+  // absent key into "", which used to overwrite the stored value; only keys present in the body
+  // become updates, and an absent one stays `undefined` (helpers.ts:createOrUpdateProfileForUser
+  // treats undefined as "leave alone").
+  const has = (key: string): boolean => Object.prototype.hasOwnProperty.call(req.body ?? {}, key);
+  const fullNameChanged = has("fullName");
+  const fullName = (fullNameChanged ? normalizeString(req.body?.fullName) : "") || user.fullName;
+  if (fullNameChanged && fullName !== user.fullName) {
+    user.fullName = fullName;
+    await user.save();
+  }
 
-  const dateOfBirthRaw = normalizeString(req.body?.dateOfBirth);
-  const profile = await createOrUpdateProfileForUser({
-    userId,
-    fullName,
-    updates: {
-      firstName: normalizeString(req.body?.firstName),
-      lastName: normalizeString(req.body?.lastName),
-      phoneNumber: normalizeString(req.body?.phoneNumber),
-      dateOfBirth: dateOfBirthRaw ? new Date(dateOfBirthRaw) : null,
-      gender: normalizeString(req.body?.gender),
-      address: normalizeString(req.body?.address),
-      avatar: normalizeString(req.body?.avatar),
-    },
-  });
+  const dateOfBirthRaw = has("dateOfBirth") ? normalizeString(req.body?.dateOfBirth) : undefined;
+  const updates: Parameters<typeof createOrUpdateProfileForUser>[0]["updates"] = {
+    firstName: has("firstName") ? normalizeString(req.body?.firstName) : undefined,
+    lastName: has("lastName") ? normalizeString(req.body?.lastName) : undefined,
+    phoneNumber: has("phoneNumber") ? normalizeString(req.body?.phoneNumber) : undefined,
+    // A present-but-blank dateOfBirth clears it; an absent one leaves it alone.
+    dateOfBirth: dateOfBirthRaw === undefined ? undefined : dateOfBirthRaw ? new Date(dateOfBirthRaw) : null,
+    gender: has("gender") ? normalizeString(req.body?.gender) : undefined,
+    address: has("address") ? normalizeString(req.body?.address) : undefined,
+    avatar: has("avatar") ? normalizeString(req.body?.avatar) : undefined,
+  };
+
+  const profile = await createOrUpdateProfileForUser({ userId, fullName, updates, fullNameChanged });
 
   return res.status(200).json({
     message: "Profile updated successfully",
@@ -539,6 +588,7 @@ export const GoogleLogin = async (req: Request, res: Response) => {
         email: user.email,
         fullName: user.fullName,
         role: user.role,
+        domainRoles: user.domainRoles,
       },
       device: buildDeviceInfo(req, req.body?.device),
     });

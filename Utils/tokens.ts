@@ -1,7 +1,7 @@
 import { createHash, randomBytes, randomUUID } from "crypto";
 import jwt, { type JwtPayload } from "jsonwebtoken";
 import { config } from "../config/Config.js";
-import type { AuthApp, AuthRole, JwtUserPayload } from "../types/auth.js";
+import type { AuthApp, AuthRole, DomainRole, JwtUserPayload } from "../types/auth.js";
 
 const ACCESS_TOKEN_TTL_SECONDS = 40 * 60;
 
@@ -18,6 +18,7 @@ export const signAccessToken = (payload: {
   email: string;
   fullName: string;
   role: AuthRole;
+  domainRoles: DomainRole[];
   jti: string;
   app: AuthApp;
 }): string =>

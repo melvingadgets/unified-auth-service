@@ -6,7 +6,8 @@ import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
 
 import { config } from "../config/Config.js";
-import type { AuthApp, AuthRole } from "../types/auth.js";
+import type { AuthApp, AuthRole, DomainRole } from "../types/auth.js";
+import { DOMAIN_ROLES } from "../types/auth.js";
 import { platformSigner } from "./platformTokens.js";
 import {
   decodeTokenExpiry,
@@ -34,9 +35,11 @@ export const toSafeUser = (user: {
   phoneVerified?: boolean;
   fullName: string;
   role: AuthRole;
+  domainRoles?: DomainRole[] | null;
   emailVerified: boolean;
   disabled: boolean;
   originApp: AuthApp;
+  createdAt?: Date | string | null;
 }) => ({
   _id: String(user._id),
   email: user.email ?? null,
@@ -44,9 +47,14 @@ export const toSafeUser = (user: {
   phoneVerified: Boolean(user.phoneVerified),
   fullName: user.fullName,
   role: user.role,
+  // Always an array, never undefined: clients evaluate `domainRoles` directly.
+  domainRoles: sanitizeDomainRoles(user.domainRoles),
   emailVerified: user.emailVerified,
   disabled: user.disabled,
   originApp: user.originApp,
+  // "Member since" for the Profile app. Additive, and already exposed to services by `toPerson`
+  // (PlatformInternalController), so this is not a new class of disclosure.
+  createdAt: user.createdAt ? new Date(user.createdAt).toISOString() : null,
 });
 
 export const toSafeProfile = (profile: {
@@ -81,6 +89,18 @@ export const ensurePasswordStrength = (password: string) => {
   }
 };
 
+/**
+ * Creates the profile, or updates only the fields the caller actually supplied.
+ *
+ * The distinction matters: `updates` is a PARTIAL patch. A field that is absent must be left as
+ * it was, never reset. The first version defaulted every absent key (`?? ""`), so a caller that
+ * sent only `fullName` silently erased the phone, gender, address and avatar — which is exactly
+ * what `PATCH /api/v1/auth/me/profile` did (Melvin OS Profile app, 2026-10-30). On create the
+ * defaults still apply, because there is nothing to preserve.
+ *
+ * `firstName`/`lastName` are derived from `fullName` only when the caller did not name them,
+ * and only on create or when `fullName` was itself present in the patch.
+ */
 export const createOrUpdateProfileForUser = async (args: {
   userId: string | mongoose.Types.ObjectId;
   fullName: string;
@@ -93,24 +113,40 @@ export const createOrUpdateProfileForUser = async (args: {
     address: string;
     avatar: string;
   }>;
+  /** True when `fullName` came from the request, so the derived names may replace the stored ones. */
+  fullNameChanged?: boolean;
 }) => {
   const { firstName, lastName } = parseFullName(args.fullName);
   const updates = args.updates || {};
-  return ProfileModel.findOneAndUpdate(
-    { user: args.userId },
-    {
-      $set: {
-        firstName: updates.firstName ?? firstName,
-        lastName: updates.lastName ?? lastName,
-        phoneNumber: updates.phoneNumber ?? "",
-        dateOfBirth: updates.dateOfBirth ?? null,
-        gender: updates.gender ?? "",
-        address: updates.address ?? "",
-        avatar: updates.avatar ?? "",
-      },
-    },
-    { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }
-  ).lean();
+
+  const created = {
+    firstName: updates.firstName ?? firstName,
+    lastName: updates.lastName ?? lastName,
+    phoneNumber: updates.phoneNumber ?? "",
+    dateOfBirth: updates.dateOfBirth ?? null,
+    gender: updates.gender ?? "",
+    address: updates.address ?? "",
+    avatar: updates.avatar ?? "",
+  };
+
+  // Absent keys are omitted from this patch, so `$set` touches only what was supplied.
+  const patch: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(updates)) {
+    if (value !== undefined) patch[key] = value;
+  }
+  if (patch.firstName === undefined && args.fullNameChanged) patch.firstName = firstName;
+  if (patch.lastName === undefined && args.fullNameChanged) patch.lastName = lastName;
+
+  const existing = await ProfileModel.findOne({ user: args.userId }).lean();
+  if (!existing && !Object.keys(patch).length) {
+    // Nothing to change and no row yet: create the default one.
+    return ProfileModel.findOneAndUpdate({ user: args.userId }, { $set: created }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }).lean();
+  }
+  if (!existing) {
+    return ProfileModel.findOneAndUpdate({ user: args.userId }, { $set: { ...created, ...patch } }, { upsert: true, returnDocument: "after", setDefaultsOnInsert: true }).lean();
+  }
+  if (!Object.keys(patch).length) return existing;
+  return ProfileModel.findOneAndUpdate({ user: args.userId }, { $set: patch }, { returnDocument: "after" }).lean();
 };
 
 // RS256 tokens for a session (Shortwork/AGENTS.md §2): a 15-minute access token whose
@@ -123,7 +159,13 @@ export type PlatformSessionTokens = {
 };
 
 export const createSessionForUser = async (args: {
-  user: { _id: mongoose.Types.ObjectId | string; email?: string | null; fullName: string; role: AuthRole };
+  user: {
+    _id: mongoose.Types.ObjectId | string;
+    email?: string | null;
+    fullName: string;
+    role: AuthRole;
+    domainRoles?: DomainRole[] | null;
+  };
   app?: AuthApp;
   device?: Partial<{
     userAgent: string;
@@ -133,11 +175,13 @@ export const createSessionForUser = async (args: {
   }>;
 }) => {
   const jti = generateJti();
+  const domainRoles = sanitizeDomainRoles(args.user.domainRoles);
   const token = signAccessToken({
     _id: String(args.user._id),
     email: args.user.email ?? "",
     fullName: args.user.fullName,
     role: args.user.role,
+    domainRoles,
     jti,
     app: args.app || "auth-service",
   });
@@ -145,7 +189,12 @@ export const createSessionForUser = async (args: {
 
   let platform: PlatformSessionTokens | null = null;
   if (platformSigner) {
-    const access = await platformSigner.signUserToken({ personId: String(args.user._id), role: args.user.role, sessionId: jti });
+    const access = await platformSigner.signUserToken({
+      personId: String(args.user._id),
+      role: args.user.role,
+      domainRoles,
+      sessionId: jti,
+    });
     platform = {
       accessToken: access.token,
       accessTokenExpiresAt: access.expiresAt,
@@ -228,8 +277,14 @@ export const rotateRefreshToken = async (presented: string): Promise<RefreshOutc
     return { status: "revoked" };
   }
 
-  // The role is read fresh on every refresh, so a role change reaches tokens within 15 minutes.
-  const access = await platformSigner.signUserToken({ personId: String(user._id), role: user.role, sessionId: session.jti });
+  // Role and domain roles are read fresh on every refresh, so a change reaches tokens
+  // within 15 minutes rather than at the next login.
+  const access = await platformSigner.signUserToken({
+    personId: String(user._id),
+    role: user.role,
+    domainRoles: sanitizeDomainRoles(user.domainRoles),
+    sessionId: session.jti,
+  });
   return {
     status: "ok",
     tokens: {
@@ -374,20 +429,92 @@ export const normalizeRoleInput = (value: unknown): AuthRole => {
   throw new Error("role must be one of: User, Admin, SuperAdmin");
 };
 
+const isDomainRole = (value: unknown): value is DomainRole =>
+  typeof value === "string" && (DOMAIN_ROLES as readonly string[]).includes(value);
+
+/**
+ * Validates a `domainRoles` input. Unlike a role, this list is empty by default, so an
+ * omitted or null value means "no domain roles" rather than an error. Anything that
+ * isn't a list of known names is refused — never silently filtered, because a caller
+ * asking for `markat:salesperson` and getting nothing back would look like success.
+ */
+export const normalizeDomainRoles = (value: unknown): DomainRole[] => {
+  if (value === undefined || value === null || value === "") return [];
+  if (!Array.isArray(value)) {
+    throw new Error(`domainRoles must be a list of: ${DOMAIN_ROLES.join(", ")}`);
+  }
+  const unknown = value.filter((item) => !isDomainRole(item));
+  if (unknown.length > 0) {
+    throw new Error(`unknown domain role "${String(unknown[0])}"; expected one of: ${DOMAIN_ROLES.join(", ")}`);
+  }
+  // Dedupe: the same domain role granted twice is still one grant.
+  return [...new Set(value as DomainRole[])];
+};
+
+/** The stored list, filtered for reading. Never invents a grant. */
+export const sanitizeDomainRoles = (value: unknown): DomainRole[] =>
+  Array.isArray(value) ? [...new Set(value.filter(isDomainRole))] : [];
 
 
-export const isMailConfigured = () =>
-  Boolean(
-    config.mail.from &&
-      ((config.mail.provider === "smtp" && config.mail.smtp.gmailUser && config.mail.smtp.gmailAppPassword) ||
-        (config.mail.provider === "resend" && config.mail.resend.apiKey))
-  );
+
+/**
+ * The placeholder values `.env.example` used to ship. They are non-empty, so a presence-only check
+ * called them "configured" and the first sign-up then failed at send time (2026-10-30). A copied
+ * `.env` must take the no-mail path, not a broken one.
+ */
+const MAIL_PLACEHOLDERS = [
+  "re_your_api_key_here",
+  "youremail@gmail.com",
+  "your16charapppassword",
+  "your_google_client_id_here",
+  "replace_me",
+  "changeme",
+];
+
+/** Non-empty AND not an example value: a placeholder is not a credential. */
+const looksReal = (value: unknown): boolean => {
+  const text = String(value ?? "").trim();
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  if (MAIL_PLACEHOLDERS.includes(lower)) return false;
+  if (lower.includes("your_") || lower.includes("replace_") || lower.includes("example.com")) return false;
+  return true;
+};
+
+/**
+ * Whether there is a usable mail transport. Deliberately a LOCAL check — it never contacts the
+ * provider, so startup cannot depend on a third party; a real key the provider rejects is a send
+ * failure, and every caller must survive one (see `RegisterUser`).
+ *
+ * This is the single definition: `Utils/Mailer.ts` imports it rather than keeping its own copy,
+ * because two copies of one rule is how they drift.
+ */
+export interface MailConfigView {
+  provider: string;
+  from: string;
+  smtp: { gmailUser: string; gmailAppPassword: string };
+  resend: { apiKey: string };
+}
+
+/**
+ * The decision, as a pure function of a config value — so it is testable with any input without
+ * reloading modules (Config reads the environment once, at import).
+ */
+export const mailIsConfigured = (mail: MailConfigView): boolean => {
+  if (!looksReal(mail.from)) return false;
+  if (mail.provider === "smtp") return looksReal(mail.smtp.gmailUser) && looksReal(mail.smtp.gmailAppPassword);
+  if (mail.provider === "resend") return looksReal(mail.resend.apiKey);
+  return false;
+};
+
+export const isMailConfigured = () => mailIsConfigured(config.mail);
 
 export const createUserRecord = async (args: {
   email: string;
   passwordHash: string;
   fullName: string;
   role: AuthRole;
+  domainRoles?: DomainRole[];
   originApp?: AuthApp;
   emailVerified: boolean;
   legacyIds?: {
@@ -400,6 +527,7 @@ export const createUserRecord = async (args: {
     password: args.passwordHash,
     fullName: args.fullName,
     role: args.role,
+    domainRoles: args.domainRoles ?? [],
     emailVerified: args.emailVerified,
     disabled: false,
     originApp: args.originApp || "auth-service",

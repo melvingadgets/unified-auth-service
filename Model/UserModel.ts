@@ -1,5 +1,6 @@
 import mongoose from "mongoose";
-import type { AuthApp, AuthRole } from "../types/auth.js";
+import type { AuthApp, AuthRole, DomainRole } from "../types/auth.js";
+import { DOMAIN_ROLES } from "../types/auth.js";
 
 // A person is identified by email or phone (decision S4, 2026-10-23): at least one is
 // required, each is unique when present, and a phone only signs someone in once verified.
@@ -11,6 +12,8 @@ export interface AuthUser {
   googleId?: string;
   fullName: string;
   role: AuthRole;
+  /** Narrow capabilities granted on top of `role`. Empty for ordinary people and staff tiers. */
+  domainRoles: DomainRole[];
   emailVerified: boolean;
   disabled: boolean;
   originApp: AuthApp;
@@ -66,6 +69,14 @@ const UserSchema = new mongoose.Schema<AuthUserDocument>(
       enum: ["User", "Admin", "SuperAdmin"],
       default: "User",
       index: true,
+    },
+    // Not a staff tier: `market:salesperson` grants two market permissions and nothing
+    // else (docs/rbac-unification.md). Defaulted to [] so every existing row reads as
+    // "no domain roles" without a backfill.
+    domainRoles: {
+      type: [String],
+      enum: DOMAIN_ROLES,
+      default: [],
     },
     emailVerified: {
       type: Boolean,

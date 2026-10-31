@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import { can, isPlatformRole } from "@melvingadgets/platform-kit";
 import mongoose from "mongoose";
 import ProfileModel from "../Model/ProfileModel.js";
 import SessionModel from "../Model/SessionModel.js";
@@ -8,6 +9,7 @@ import {
   deactivateUserSessions,
   ensurePasswordStrength,
   hashPassword,
+  normalizeDomainRoles,
   normalizeRoleInput,
   toSafeProfile,
   toSafeUser,
@@ -16,24 +18,31 @@ import {
 const normalizeString = (value: unknown): string => String(value ?? "").trim();
 const normalizeEmail = (value: unknown): string => normalizeString(value).toLowerCase();
 
+// Whoever the guard verified. `verifyToken` sets `req.person` for a platform token and
+// `req.user` for the legacy one; `can` reads the role from whichever is present and
+// fails closed on neither.
+const actorOf = (req: Request) =>
+  req.person
+    ? { role: req.person.role, domainRoles: req.person.domainRoles }
+    : { role: req.user?.role, domainRoles: req.user?.domainRoles };
+
 export const AdminCreateUser = async (req: Request, res: Response) => {
   try {
-    const actorRole = req.user?.role;
-    if (!actorRole) {
-      return res.status(401).json({ message: "Access denied" });
-    }
-
     const fullName = normalizeString(req.body?.fullName);
     const email = normalizeEmail(req.body?.email);
     const password = String(req.body?.password ?? "");
+    // Scoped to this try: a bad role or domain role is a 400 with its reason, below.
     const requestedRole = normalizeRoleInput(req.body?.role || "User");
+    const requestedDomainRoles = normalizeDomainRoles(req.body?.domainRoles);
 
     if (!fullName || !email || !password) {
       return res.status(400).json({ message: "fullName, email and password are required" });
     }
 
-    if (actorRole === "Admin" && requestedRole !== "User") {
-      return res.status(403).json({ message: "Admin can create user accounts only" });
+    // Creating an Admin or SuperAdmin is itself a permission, not a role comparison.
+    // An Admin holds `auth.users.create_user` and so may create `User` accounts only.
+    if (requestedRole !== "User" && !can(actorOf(req), "auth.users.create_admin")) {
+      return res.status(403).json({ message: "Access denied" });
     }
 
     ensurePasswordStrength(password);
@@ -47,7 +56,8 @@ export const AdminCreateUser = async (req: Request, res: Response) => {
       email,
       passwordHash: await hashPassword(password),
       fullName,
-      role: normalizeRoleInput(req.body?.role || "User"),
+      role: requestedRole,
+      domainRoles: requestedDomainRoles,
       emailVerified: true,
     });
 
@@ -70,9 +80,20 @@ export const AdminListUsers = async (req: Request, res: Response) => {
   try {
     const page = Math.max(Number(req.query?.page) || 1, 1);
     const limit = Math.min(Math.max(Number(req.query?.limit) || 20, 1), 200);
-    const role = normalizeString(req.query?.role);
     const search = normalizeString(req.query?.search);
     const disabledRaw = normalizeString(req.query?.disabled);
+
+    // `req.query.role` used to be copied straight into the Mongo filter. Express's
+    // default `qs` parser turns `?role[$ne]=User` into `{ "$ne": "User" }`, so an Admin
+    // could filter on anything. It must be exactly one known role name or it's refused.
+    const rawRole = req.query?.role;
+    let role: string | undefined;
+    if (rawRole !== undefined && rawRole !== "") {
+      if (typeof rawRole !== "string" || !isPlatformRole(rawRole)) {
+        return res.status(400).json({ message: "role must be one of: User, Admin, SuperAdmin" });
+      }
+      role = rawRole;
+    }
 
     const filter: Record<string, unknown> = {};
     if (role) {
@@ -82,9 +103,11 @@ export const AdminListUsers = async (req: Request, res: Response) => {
       filter.disabled = disabledRaw === "true";
     }
     if (search) {
+      // Regex metacharacters in user input must not change the query's meaning.
+      const escaped = search.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       filter.$or = [
-        { email: { $regex: search, $options: "i" } },
-        { fullName: { $regex: search, $options: "i" } },
+        { email: { $regex: escaped, $options: "i" } },
+        { fullName: { $regex: escaped, $options: "i" } },
       ];
     }
 
@@ -146,15 +169,20 @@ export const AdminGetSingleUser = async (req: Request, res: Response) => {
   });
 };
 
+// Guarded by `auth.users.change_role`. The role comparison that used to live here
+// (`req.user?.role !== "SuperAdmin"`) is gone: it read the legacy claim only, so a
+// platform-token SuperAdmin was refused while the guard already allowed them.
 export const AdminUpdateUserRole = async (req: Request, res: Response) => {
-  if (req.user?.role !== "SuperAdmin") {
-    return res.status(403).json({ message: "Access denied" });
-  }
-
   const userId = normalizeString(req.params?.id);
-  const role = normalizeRoleInput(req.body?.role);
   if (!userId || !mongoose.isValidObjectId(userId)) {
     return res.status(400).json({ message: "A valid user id is required" });
+  }
+
+  let role: ReturnType<typeof normalizeRoleInput>;
+  try {
+    role = normalizeRoleInput(req.body?.role);
+  } catch (error: any) {
+    return res.status(400).json({ message: error?.message || "role must be one of: User, Admin, SuperAdmin" });
   }
 
   const user = await UserModel.findByIdAndUpdate(
@@ -169,6 +197,43 @@ export const AdminUpdateUserRole = async (req: Request, res: Response) => {
 
   return res.status(200).json({
     message: "User role updated successfully",
+    data: toSafeUser(user),
+  });
+};
+
+/**
+ * Grants or revokes narrow capabilities without touching the global role — the way a
+ * Computer Village seller gets `market:salesperson` while staying a plain `User`.
+ * Guarded by `auth.users.change_role`, the same as changing the role itself.
+ */
+export const AdminUpdateUserDomainRoles = async (req: Request, res: Response) => {
+  const userId = normalizeString(req.params?.id);
+  if (!userId || !mongoose.isValidObjectId(userId)) {
+    return res.status(400).json({ message: "A valid user id is required" });
+  }
+
+  let domainRoles: ReturnType<typeof normalizeDomainRoles>;
+  try {
+    if (req.body?.domainRoles === undefined) {
+      return res.status(400).json({ message: "domainRoles is required (send [] to clear)" });
+    }
+    domainRoles = normalizeDomainRoles(req.body?.domainRoles);
+  } catch (error: any) {
+    return res.status(400).json({ message: error?.message || "invalid domainRoles" });
+  }
+
+  const user = await UserModel.findByIdAndUpdate(
+    userId,
+    { $set: { domainRoles } },
+    { returnDocument: "after" }
+  ).lean();
+
+  if (!user) {
+    return res.status(404).json({ message: "User not found" });
+  }
+
+  return res.status(200).json({
+    message: "User domain roles updated successfully",
     data: toSafeUser(user),
   });
 };
@@ -201,11 +266,8 @@ export const AdminDisableUser = async (req: Request, res: Response) => {
   });
 };
 
+// Guarded by `auth.users.delete` (SuperAdmin only). See AdminUpdateUserRole above.
 export const AdminDeleteUser = async (req: Request, res: Response) => {
-  if (req.user?.role !== "SuperAdmin") {
-    return res.status(403).json({ message: "Access denied" });
-  }
-
   const userId = normalizeString(req.params?.id);
   if (!userId || !mongoose.isValidObjectId(userId)) {
     return res.status(400).json({ message: "A valid user id is required" });

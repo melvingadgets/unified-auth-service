@@ -30,7 +30,7 @@ See [.env.example](.env.example) for all available configuration.
 | `AUTH_JWT_SECRET` | **Yes** | JWT signing secret (share with consumer backends) |
 | `AUTH_SERVICE_KEY` | No | API key for backend-to-backend internal endpoints |
 | `AUTH_SERVICE_PUBLIC_URL` | No | Public URL for email verification/reset links |
-| `CORS_ORIGINS` | No | Comma-separated allowed origins |
+| `CORS_ORIGINS` | No | Comma-separated allowed browser origins. Fails closed — a missing app origin blocks sign-in in the browser with no server-side error. See `.env.example`. |
 | `GMAIL_USER` | No | Gmail address for sending emails |
 | `GMAIL_APP_PASSWORD` | No | Gmail app password |
 | `MAIL_FROM` | No | Email sender display name |
