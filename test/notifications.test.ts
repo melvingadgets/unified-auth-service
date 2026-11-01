@@ -11,6 +11,7 @@ import {
   easybuyRequestApproved,
   easybuyRequestSubmitted,
   generateSigningKey,
+  resellerChatMessagePosted,
   storeOrderCompleted,
   type EventEnvelope,
 } from "@melvingadgets/platform-kit";
@@ -119,6 +120,14 @@ const requestEvent = (definition: typeof easybuyRequestSubmitted | typeof easybu
         traceId: "trace-notifications",
         data: { requestId, personId },
       });
+
+const chat = (from: "customer" | "reseller", recipientPersonId: string, conversationId: string, seq: number) =>
+  createEvent(resellerChatMessagePosted, {
+    subject: { kind: "conversation", id: conversationId },
+    seq,
+    traceId: "trace-notifications",
+    data: { conversationId, seq, from, recipientPersonId },
+  });
 
 const inbox = (token: string) => request(app).get("/api/v1/auth/me/notifications").set("authorization", `Bearer ${token}`);
 const summary = (token: string) => request(app).get("/api/v1/auth/me/notifications/summary").set("authorization", `Bearer ${token}`);
@@ -323,5 +332,91 @@ describe("/api/v1/auth/me/notifications", () => {
     expect((await markRead(ada.token, { ids: [] })).status).toBe(400);
     expect((await request(app).get("/api/v1/auth/me/notifications?limit=500").set("authorization", `Bearer ${ada.token}`)).status).toBe(400);
     expect((await request(app).get("/api/v1/auth/me/notifications?before=nonsense").set("authorization", `Bearer ${ada.token}`)).status).toBe(400);
+  });
+});
+
+describe("history (an event that arrives long after it happened)", () => {
+  it("stores it already read, so it is listed but never counted", async () => {
+    const late = { ...payment(ada.id, 300_000), occurredAt: new Date(Date.now() - 3 * 86_400_000).toISOString() };
+    const res = await deliver(late);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("applied");
+
+    const stored = await models.NotificationModel.findById(late.eventId).lean();
+    expect(stored?.readAt).toBeInstanceOf(Date);
+    expect((await summary(ada.token)).body).toEqual({ unread: 0, byApp: {} });
+    expect((await inbox(ada.token)).body.notifications.map((n: { id: string }) => n.id)).toEqual([late.eventId]);
+
+    // News still counts.
+    await deliver(payment(ada.id, 400_000));
+    expect((await summary(ada.token)).body).toEqual({ unread: 1, byApp: { "Easybuy Portal": 1 } });
+  });
+});
+
+describe("chat notices (one per conversation)", () => {
+  const conversation = () => `conv-${randomUUID().slice(0, 8)}`;
+
+  it("collapses a conversation's messages into one unread notice that counts them", async () => {
+    const conv = conversation();
+    expect((await deliver(chat("reseller", ada.id, conv, 1))).body.status).toBe("applied");
+    expect((await deliver(chat("reseller", ada.id, conv, 2))).body.status).toBe("applied");
+
+    const { notifications } = (await inbox(ada.token)).body;
+    expect(notifications).toHaveLength(1);
+    expect(notifications[0]).toMatchObject({
+      id: `chat:${ada.id}:${conv}`,
+      app: "Chat",
+      category: "reseller.chat",
+      title: "New message",
+      body: "2 new messages from your reseller.",
+      readAt: null,
+    });
+    expect((await summary(ada.token)).body).toEqual({ unread: 1, byApp: { Chat: 1 } });
+    expect(await models.NotificationModel.countDocuments({ personId: bola.id })).toBe(0);
+  });
+
+  it("ignores a repeated or an older message, and starts counting again once read", async () => {
+    const conv = conversation();
+    const first = chat("reseller", ada.id, conv, 1);
+    const second = chat("reseller", ada.id, conv, 2);
+    await deliver(first);
+    await deliver(second);
+    expect((await deliver(second)).body.status).toBe("duplicate");
+    expect((await deliver(first)).body.status).toBe("stale");
+    const id = `chat:${ada.id}:${conv}`;
+    expect(await models.NotificationModel.findById(id).lean()).toMatchObject({ count: 2, lastSeq: 2 });
+
+    await markRead(ada.token, { app: "Chat" });
+    expect((await deliver(chat("reseller", ada.id, conv, 3))).body.status).toBe("applied");
+    const after = await models.NotificationModel.findById(id).lean();
+    expect(after).toMatchObject({ count: 1, lastSeq: 3, body: "Your reseller replied.", readAt: null });
+    expect((await summary(ada.token)).body).toEqual({ unread: 1, byApp: { Chat: 1 } });
+  });
+
+  it("applies one message once even when two deliveries of it race", async () => {
+    const conv = conversation();
+    await deliver(chat("reseller", ada.id, conv, 1));
+    const second = chat("reseller", ada.id, conv, 2);
+    const results = await Promise.all([deliver(second), deliver(second), deliver(second)]);
+    expect(results.map((res) => res.status)).toEqual([200, 200, 200]);
+    expect(results.map((res) => res.body.status).sort()).toEqual(["applied", "duplicate", "duplicate"]);
+    expect(await models.NotificationModel.findById(`chat:${ada.id}:${conv}`).lean()).toMatchObject({ count: 2, lastSeq: 2 });
+  });
+
+  it("tells the reseller about a customer's message in the Reseller app, apart from the customer's own notice", async () => {
+    const conv = conversation();
+    await deliver(chat("reseller", ada.id, conv, 1));
+    await deliver(chat("customer", bola.id, conv, 2));
+
+    const resellerSide = (await inbox(bola.token)).body.notifications;
+    expect(resellerSide).toHaveLength(1);
+    expect(resellerSide[0]).toMatchObject({
+      id: `chat:${bola.id}:${conv}`,
+      app: "Reseller",
+      title: "New message from a customer",
+      body: "A customer sent you a message. Open Chats to reply.",
+    });
+    // The customer's notice is untouched by the other side's message.
+    expect((await inbox(ada.token)).body.notifications[0]).toMatchObject({ body: "Your reseller replied." });
   });
 });

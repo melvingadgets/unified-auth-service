@@ -1,13 +1,24 @@
 import type { NextFunction, Request, Response } from "express";
 
-// In-memory fixed-window limiter, one bucket map per limiter. Keyed on req.ip,
+// In-memory fixed-window limiter, one bucket map per limiter. Keyed on req.ip by default,
 // which is the real client address only because MainApp sets `trust proxy`
-// (Railway puts one proxy in front of the service).
-export const rateLimiter = ({ windowMs, limit, message }: { windowMs: number; limit: number; message: string }) => {
+// (Railway puts one proxy in front of the service). A limiter behind verifyToken can key
+// on the person instead with `keyOf`.
+export const rateLimiter = ({
+  windowMs,
+  limit,
+  message,
+  keyOf,
+}: {
+  windowMs: number;
+  limit: number;
+  message: string;
+  keyOf?: (req: Request) => string;
+}) => {
   const hits = new Map<string, { count: number; resetAt: number }>();
 
   return (req: Request, res: Response, next: NextFunction) => {
-    const key = String(req.ip || "unknown");
+    const key = keyOf ? keyOf(req) : String(req.ip || "unknown");
     const now = Date.now();
     const current = hits.get(key);
 

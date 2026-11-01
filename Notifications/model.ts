@@ -7,7 +7,10 @@ import mongoose from "mongoose";
 const RETENTION_SECONDS = 180 * 24 * 60 * 60;
 
 export interface NotificationRecord {
-  /** The eventId. One event makes at most one notification, so the document is its own inbox record. */
+  /**
+   * The eventId: one event makes at most one notification, so the document is its own inbox record.
+   * A collapsing notice (chat) uses its rule's id instead, and `lastSeq` is its inbox record.
+   */
   _id: string;
   personId: string;
   category: string;
@@ -22,6 +25,10 @@ export interface NotificationRecord {
   asOf: Date;
   readAt: Date | null;
   createdAt: Date;
+  /** Collapsing notices only: messages waiting since it was last read. */
+  count?: number;
+  /** Collapsing notices only: the newest message seq applied. */
+  lastSeq?: number;
 }
 
 const notificationSchema = new mongoose.Schema<NotificationRecord>(
@@ -40,6 +47,8 @@ const notificationSchema = new mongoose.Schema<NotificationRecord>(
     asOf: { type: Date, required: true },
     readAt: { type: Date, default: null },
     createdAt: { type: Date, required: true },
+    count: { type: Number },
+    lastSeq: { type: Number },
   },
   { versionKey: false, collection: "notifications" }
 );

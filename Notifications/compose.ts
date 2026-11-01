@@ -5,17 +5,34 @@ import { kobo, koboToNaira, type EventEnvelope } from "@melvingadgets/platform-k
 // The text carries product names and amounts, never a name, an email, a phone number, a NIN, a
 // free-text reason or message content. The person reads the rest in the app it opens.
 
-export const NOTIFICATION_APPS = ["Profile", "Easybuy Portal", "Recommerce Store", "Reseller"] as const;
+export const NOTIFICATION_APPS = ["Profile", "Easybuy Portal", "Recommerce Store", "Reseller", "Chat"] as const;
 export type NotificationApp = (typeof NOTIFICATION_APPS)[number];
 
-export type NotificationCategory = "easybuy.application" | "easybuy.finance" | "store.order" | "reseller.payout";
+export type NotificationCategory = "easybuy.application" | "easybuy.finance" | "store.order" | "reseller.payout" | "reseller.chat";
+
+/**
+ * Notices that collapse: one per recipient and conversation instead of one per event, so ten chat
+ * messages make one "10 new messages" notice, not ten.
+ */
+export interface CollapseRule {
+  /** The notice's own id, the same for every message in the conversation. */
+  id: string;
+  /** The conversation's message counter. A notice only ever moves forward. */
+  seq: number;
+  /** The body once more than one message is waiting: `${count}${manySuffix}`. */
+  manySuffix: string;
+  /** Replaces the previous alert for the conversation on the person's device. */
+  tag: string;
+}
 
 export interface NotificationDraft {
   personId: string;
   category: NotificationCategory;
   app: NotificationApp;
   title: string;
+  /** The body for one event (one message, for a collapsing notice). */
   body: string;
+  collapse?: CollapseRule;
 }
 
 type Plan = "Weekly" | "Monthly";
@@ -140,6 +157,33 @@ export const composeNotification = (event: EventEnvelope): NotificationDraft | n
         "Payout sent",
         `${formatNaira(d.totalKobo)} for ${count(d.entryCount, "commission", "commissions")} is on its way to your bank.`,
       );
+    }
+    case "reseller.chat.message.posted": {
+      // Who should hear about it, never what was said: the message stays in the reseller service.
+      const d = event.data as { conversationId: string; seq: number; from: "customer" | "reseller"; recipientPersonId: string };
+      const collapse = (manySuffix: string): CollapseRule => ({
+        id: `chat:${d.recipientPersonId}:${d.conversationId}`,
+        seq: d.seq,
+        manySuffix,
+        tag: `chat:${d.conversationId}`,
+      });
+      return d.from === "reseller"
+        ? {
+            personId: d.recipientPersonId,
+            category: "reseller.chat",
+            app: "Chat",
+            title: "New message",
+            body: "Your reseller replied.",
+            collapse: collapse(" new messages from your reseller."),
+          }
+        : {
+            personId: d.recipientPersonId,
+            category: "reseller.chat",
+            app: "Reseller",
+            title: "New message from a customer",
+            body: "A customer sent you a message. Open Chats to reply.",
+            collapse: collapse(" new messages from a customer. Open Chats to reply."),
+          };
     }
     default:
       return null;

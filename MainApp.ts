@@ -8,6 +8,9 @@ import OAuthRouter from "./Router/OAuthRouter.js";
 import PlatformInternalRouter from "./Router/PlatformInternalRouter.js";
 import NotificationsRouter from "./Notifications/router.js";
 import { createNotificationReceiver, type NotificationReceiverOptions } from "./Notifications/receiver.js";
+import { createPushRouter } from "./Push/router.js";
+import { createPushSender, type PushSender } from "./Push/sender.js";
+import SetupRouter from "./Setup/setup.js";
 import { requestLog } from "./Middleware/requestLog.js";
 import { config } from "./config/Config.js";
 import { buildPlatformCorsOptions } from "./Utils/corsHelper.js";
@@ -16,9 +19,25 @@ import { platformVerifier } from "./Utils/platformTokens.js";
 export interface MainAppDeps {
   /** The relay's delivery-signature verifier. Tests pass one built from a local key set. */
   notificationDeliveries?: NotificationReceiverOptions["deliveries"];
+  /** Replaces the Web Push sender built from VAPID_*; null turns push off. */
+  push?: PushSender | null;
 }
 
+const buildPushSender = (): PushSender | null => {
+  if (!config.push.vapid) return null;
+  try {
+    return createPushSender({ vapid: config.push.vapid, allowedHosts: config.push.allowedHosts });
+  } catch {
+    // Never the error text: it can quote the bad value.
+    const line = { time: new Date().toISOString(), level: "error", svc: "auth", event: "push_config", message: "VAPID settings are unusable; push alerts are off" };
+    process.stdout.write(`${JSON.stringify(line)}\n`);
+    return null;
+  }
+};
+
 export const MainApp = (app: Application, deps: MainAppDeps = {}) => {
+  const push = deps.push !== undefined ? deps.push : buildPushSender();
+
   // Railway terminates TLS in one proxy hop; without this every client shares the proxy's IP.
   app.set("trust proxy", 1);
   app.use(requestLog("auth"));
@@ -36,6 +55,7 @@ export const MainApp = (app: Application, deps: MainAppDeps = {}) => {
           : config.relayJwksUrl
             ? createDeliveryVerifier({ jwks: config.relayJwksUrl })
             : null,
+      push,
     })
   );
 
@@ -55,6 +75,8 @@ export const MainApp = (app: Application, deps: MainAppDeps = {}) => {
 
   app.use(OAuthRouter);
   app.use("/api/v1/auth/me/notifications", NotificationsRouter);
+  app.use("/api/v1/auth/me/push", createPushRouter(push, config.push.allowedHosts));
+  app.use("/api/v1/auth/me/setup", SetupRouter);
   app.use("/api/v1/auth", AuthRouter);
   app.use("/api/v1/auth/admin", AdminRouter);
   // Service-token routes (Shortwork/AGENTS.md §2) sit next to the legacy service-key ones until callers move.

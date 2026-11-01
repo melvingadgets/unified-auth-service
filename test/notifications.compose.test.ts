@@ -6,6 +6,7 @@ import {
   easybuyRequestApproved,
   easybuyRequestRejected,
   easybuyRequestSubmitted,
+  resellerChatMessagePosted,
   resellerPayoutPaid,
   storeOrderCancelled,
   storeOrderCompleted,
@@ -159,6 +160,35 @@ describe("composeNotification", () => {
       title: "Payout sent",
       body: "₦12,345 for 3 commissions is on its way to your bank.",
     });
+  });
+
+  it("tells the other side of a chat that a message is waiting, without its text, one notice per conversation", () => {
+    const chat = (from: "customer" | "reseller", recipientPersonId: string, seq: number) =>
+      createEvent(resellerChatMessagePosted, {
+        subject: { kind: "conversation", id: "conv-7" },
+        seq,
+        traceId: "trace-notify-test",
+        data: { conversationId: "conv-7", seq, from, recipientPersonId },
+      });
+    expect(composeNotification(chat("reseller", PERSON, 3))).toEqual({
+      personId: PERSON,
+      category: "reseller.chat",
+      app: "Chat",
+      title: "New message",
+      body: "Your reseller replied.",
+      collapse: { id: `chat:${PERSON}:conv-7`, seq: 3, manySuffix: " new messages from your reseller.", tag: "chat:conv-7" },
+    });
+    const RESELLER = "6720a1b2c3d4e5f6a7b8c9ff";
+    expect(composeNotification(chat("customer", RESELLER, 4))).toEqual({
+      personId: RESELLER,
+      category: "reseller.chat",
+      app: "Reseller",
+      title: "New message from a customer",
+      body: "A customer sent you a message. Open Chats to reply.",
+      collapse: { id: `chat:${RESELLER}:conv-7`, seq: 4, manySuffix: " new messages from a customer. Open Chats to reply.", tag: "chat:conv-7" },
+    });
+    // Both sides of one conversation get separate notices; one side's messages always share one.
+    expect(composeNotification(chat("reseller", PERSON, 9))?.collapse?.id).toBe(composeNotification(chat("reseller", PERSON, 3))?.collapse?.id);
   });
 
   it("makes nothing for an event with no platform person", () => {

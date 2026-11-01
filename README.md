@@ -35,6 +35,9 @@ See [.env.example](.env.example) for all available configuration.
 | `GMAIL_APP_PASSWORD` | No | Gmail app password |
 | `MAIL_FROM` | No | Email sender display name |
 | `RELAY_JWKS_URL` | No | The event relay's JWKS, for signed deliveries to `/internal/events` (in-app notifications). Unset: that route answers 503. |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | No | Web Push key pair (`npx web-push generate-vapid-keys`), one per environment. Both plus `VAPID_SUBJECT` turn device alerts on. Changing the pair orphans every saved device. |
+| `VAPID_SUBJECT` | No | `mailto:` or `https:` contact the push services can reach |
+| `PUSH_ALLOWED_HOSTS` | No | Tests and e2e only: extra push hosts (loopback may use http). Unset in deployed environments. |
 
 ## API Endpoints
 
@@ -63,6 +66,12 @@ See [.env.example](.env.example) for all available configuration.
 | GET | `/api/v1/auth/me/notifications` | Your notifications, newest first (`limit` ≤ 50, `before` cursor) |
 | GET | `/api/v1/auth/me/notifications/summary` | Unread count, total and per app (badges) |
 | POST | `/api/v1/auth/me/notifications/read` | Mark read: `{ ids }`, `{ app }` or `{ all: true }` |
+| GET | `/api/v1/auth/me/push/config` | `{ enabled, publicKey }` for Web Push |
+| PUT | `/api/v1/auth/me/push/subscription` | Save this browser's `PushSubscription` for you (endpoint must be a browser push service) |
+| DELETE | `/api/v1/auth/me/push/subscription` | Remove it: `{ endpoint }` (only your own) |
+| POST | `/api/v1/auth/me/push/test` | Send "Notifications are on" to your devices (5 per 10 minutes) |
+| GET | `/api/v1/auth/me/setup` | Setup Assistant state: `{ completedAt, interests }` (`completedAt` null = not done yet) |
+| PUT | `/api/v1/auth/me/setup` | Finish it: `{ completed: true, interests }` from `shop`, `easybuy`, `reseller`, `swap` |
 
 ### Event deliveries (relay only)
 
