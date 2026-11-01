@@ -7,6 +7,7 @@ import InternalRouter from "./Router/InternalRouter.js";
 import OAuthRouter from "./Router/OAuthRouter.js";
 import PlatformInternalRouter from "./Router/PlatformInternalRouter.js";
 import NotificationsRouter from "./Notifications/router.js";
+import HomeAppsRouter from "./HomeApps/router.js";
 import { createNotificationReceiver, type NotificationReceiverOptions } from "./Notifications/receiver.js";
 import { createPushRouter } from "./Push/router.js";
 import { createPushSender, type PushSender } from "./Push/sender.js";
@@ -77,6 +78,9 @@ export const MainApp = (app: Application, deps: MainAppDeps = {}) => {
   app.use("/api/v1/auth/me/notifications", NotificationsRouter);
   app.use("/api/v1/auth/me/push", createPushRouter(push, config.push.allowedHosts));
   app.use("/api/v1/auth/me/setup", SetupRouter);
+  // The person's home-screen choices (Shortwork/docs/app-store.md §3). A display preference: it
+  // grants nothing, and no route may consult it to allow or refuse anything.
+  app.use("/api/v1/auth/me/home-apps", HomeAppsRouter);
   app.use("/api/v1/auth", AuthRouter);
   app.use("/api/v1/auth/admin", AdminRouter);
   // Service-token routes (Shortwork/AGENTS.md §2) sit next to the legacy service-key ones until callers move.

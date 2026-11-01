@@ -20,6 +20,7 @@
   - Exactly once without transactions: a notification's `_id` is its eventId. The test database is a standalone Mongo, so never switch this to the kit's `applyOnce` (it needs a replica set). The stale rule uses `notification_cursors`.
   - `compose.ts` is pure and owns all wording. Text never carries a name, email, phone, NIN, free-text reason or message content. Logs carry eventId / type / personId / outcome only.
   - `/api/v1/auth/me/notifications` (list, `/summary`, `/read`) is always scoped by the token's person. Someone else's id behaves exactly like an unknown one.
+
   - **History:** an event more than 24 h older than its arrival (a relay backfill, a late replay) is stored already read and never pushed (`HISTORY_AFTER_MS` in `receiver.ts`).
   - **Chat notices collapse:** `reseller.chat.message.posted` makes one notice per recipient and conversation (`_id` `chat:<personId>:<conversationId>`). One pipeline update guarded by `lastSeq < seq` moves it forward; a repeat or an older message hits the unique `_id` and changes nothing. Keep that single update: a find-then-write would let a racing duplicate count twice.
   - **Repayment reminders:** `easybuy.repayment.due` (kit 0.8.0) makes one notice per event in the Easybuy Portal, with the naira amount and the due date. EasyBuy decides who owes what and when, and sends each stage once; `compose.ts` only words it. `dueOn` is a Lagos calendar date, so `formatDueDate` reads its parts and never builds a `Date`.
@@ -28,3 +29,13 @@
   - **Sending:** `web-push` encrypts the payload and signs the VAPID header; auth makes the request itself, with a 3 s timeout and no redirects. It runs after the 200 to the relay, so it never delays or undoes a delivery. A 404/410 deletes the subscription. Logs carry personId and counts, never an endpoint.
   - **Keys:** `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` / `VAPID_SUBJECT`, one pair per environment. Replacing the pair orphans every saved device.
 - **Setup Assistant (`Setup/setup.ts`):** `/api/v1/auth/me/setup` remembers per person that the hub's Setup Assistant was finished, and the interests chosen. It isn't identity data, and nothing else reads it.
+
+
+- **Home-screen preferences (`HomeApps/`; design: `Shortwork/docs/app-store.md`):** auth holds one document per person saying which apps sit on their home screen.
+  - `GET /api/v1/auth/me/home-apps` → `{ configured, apps, version }`. `PATCH` `{ changes, version }` merges; `PUT` `{ apps, version }` replaces (a device's first upload, or a Setup Assistant reset).
+  - **A display preference that grants nothing.** Never read this to allow or refuse anything: whether someone is a reseller or a vendor stays in those services, and "on my home screen" is not access. There is no `:personId` in the path for the same reason (§2.5).
+  - Optimistic concurrency: `version` rides in the body (not `If-Match`) so no CORS header is needed; a mismatch answers **409 with the current state**, and the client merges and retries. The first write relies on the unique index, never findOne-then-create (§3.8).
+  - App names are validated because they become Mongo path keys: letters and single spaces, starting with a letter, ≤ 40 chars, ≤ 64 apps, ≤ 32 changes per call.
+  - Index: `migrations/add-home-apps-index.ts` (dry-run by default, `--apply` to create, before/after counts).
+  - No event, no kit change: nothing else needs to know.
+

@@ -547,6 +547,11 @@ export const GoogleLogin = async (req: Request, res: Response) => {
     const avatar = payload.picture || "";
 
     let user = await UserModel.findOne({ email }).lean();
+    // Whether THIS request created the account. Additive, and the hub needs it: the Setup Assistant
+    // runs after a Google sign-UP exactly as it does after an email one (OSAuthSheet.tsx:279). No
+    // existing field is changed and nothing new is disclosed — an email sign-up already tells the
+    // client this by which endpoint produced the session.
+    let isNewUser = false;
 
     if (user) {
       if (user.disabled) {
@@ -572,6 +577,7 @@ export const GoogleLogin = async (req: Request, res: Response) => {
         originApp: "auth-service",
       });
       await newUser.save();
+      isNewUser = true;
       user = await UserModel.findById(newUser._id).lean();
 
       if (!user) throw new Error("Failed to create user");
@@ -607,6 +613,8 @@ export const GoogleLogin = async (req: Request, res: Response) => {
       message: "Google login successful",
       data: session.token,
       user: toSafeUser(user as any),
+      // Additive (AGENTS.md §3.5): clients that do not read it are unaffected.
+      isNewUser,
       ...platformTokenFields(session.platform),
     });
   } catch (error: any) {
