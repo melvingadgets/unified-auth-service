@@ -6,6 +6,8 @@ export const TEST_CLIENT_SECRETS = {
   store: "store-secret-for-tests",
   easybuy: "easybuy-secret-for-tests",
   reseller: "reseller-secret-for-tests",
+  // The event relay: its grant is events:deliver to each service, auth included.
+  relay: "relay-secret-for-tests",
 };
 
 const sha256 = (value: string) => createHash("sha256").update(value, "utf8").digest("hex");
@@ -23,6 +25,7 @@ process.env.AUTH_OAUTH_CLIENTS_B64 = Buffer.from(
     { clientId: "svc-store", service: "store", secretHash: sha256(TEST_CLIENT_SECRETS.store) },
     { clientId: "svc-easybuy", service: "easybuy", secretHash: sha256(TEST_CLIENT_SECRETS.easybuy) },
     { clientId: "svc-reseller", service: "reseller", secretHash: sha256(TEST_CLIENT_SECRETS.reseller) },
+    { clientId: "svc-relay", service: "relay", secretHash: sha256(TEST_CLIENT_SECRETS.relay) },
   ])
 ).toString("base64");
 // No mail transport: registration verifies the email immediately.

@@ -34,6 +34,7 @@ See [.env.example](.env.example) for all available configuration.
 | `GMAIL_USER` | No | Gmail address for sending emails |
 | `GMAIL_APP_PASSWORD` | No | Gmail app password |
 | `MAIL_FROM` | No | Email sender display name |
+| `RELAY_JWKS_URL` | No | The event relay's JWKS, for signed deliveries to `/internal/events` (in-app notifications). Unset: that route answers 503. |
 
 ## API Endpoints
 
@@ -59,6 +60,15 @@ See [.env.example](.env.example) for all available configuration.
 | POST | `/api/v1/auth/logout-all` | Revoke all sessions |
 | GET | `/api/v1/auth/sessions` | List active sessions |
 | DELETE | `/api/v1/auth/sessions/:jti` | Revoke specific session |
+| GET | `/api/v1/auth/me/notifications` | Your notifications, newest first (`limit` ≤ 50, `before` cursor) |
+| GET | `/api/v1/auth/me/notifications/summary` | Unread count, total and per app (badges) |
+| POST | `/api/v1/auth/me/notifications/read` | Mark read: `{ ids }`, `{ app }` or `{ all: true }` |
+
+### Event deliveries (relay only)
+
+| Method | Path | Description |
+|--------|------|-------------|
+| POST | `/internal/events` | Relay-signed event delivery (service token `events:deliver` + JWS over the body). Creates in-app notifications. See `Shortwork/docs/notifications.md`. |
 
 ### Admin (requires Admin or SuperAdmin role)
 

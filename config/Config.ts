@@ -94,6 +94,9 @@ export const config = {
   activeKid,
   refreshTokenTtlDays,
   oauthClients,
+  // The relay's JWKS, for event-delivery signatures (Shortwork/docs/notifications.md §5).
+  // Unset: /internal/events answers 503 and the relay keeps the events for later.
+  relayJwksUrl: String(process.env.RELAY_JWKS_URL ?? "").trim(),
   mail: {
     provider: mailProvider,
     from: mailFrom,
