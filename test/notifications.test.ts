@@ -8,6 +8,7 @@ import {
   createDeliveryVerifier,
   createEvent,
   easybuyPaymentApproved,
+  easybuyRepaymentDue,
   easybuyRequestApproved,
   easybuyRequestSubmitted,
   generateSigningKey,
@@ -127,6 +128,14 @@ const chat = (from: "customer" | "reseller", recipientPersonId: string, conversa
     seq,
     traceId: "trace-notifications",
     data: { conversationId, seq, from, recipientPersonId },
+  });
+
+const reminder = (personId: string, stage: "upcoming" | "due" | "overdue", seq: number, itemId = "item-1", instalment = 1) =>
+  createEvent(easybuyRepaymentDue, {
+    subject: { kind: "instalment", id: `${itemId}:${instalment}`, personId },
+    seq,
+    traceId: "trace-notifications",
+    data: { itemId, personId, instalment, dueOn: "2026-11-08", amountKobo: 16_000_000, stage },
   });
 
 const inbox = (token: string) => request(app).get("/api/v1/auth/me/notifications").set("authorization", `Bearer ${token}`);
@@ -332,6 +341,65 @@ describe("/api/v1/auth/me/notifications", () => {
     expect((await markRead(ada.token, { ids: [] })).status).toBe(400);
     expect((await request(app).get("/api/v1/auth/me/notifications?limit=500").set("authorization", `Bearer ${ada.token}`)).status).toBe(400);
     expect((await request(app).get("/api/v1/auth/me/notifications?before=nonsense").set("authorization", `Bearer ${ada.token}`)).status).toBe(400);
+  });
+});
+
+describe("repayment reminders", () => {
+  it("stores the notice for the person in the Easybuy Portal, unread, with the amount and date", async () => {
+    const event = reminder(ada.id, "upcoming", 1);
+    const res = await deliver(event);
+    expect(res.status).toBe(200);
+    expect(res.body).toEqual({ status: "applied" });
+
+    const stored = await models.NotificationModel.findById(event.eventId).lean();
+    expect(stored).toMatchObject({
+      personId: ada.id,
+      category: "easybuy.finance",
+      app: "Easybuy Portal",
+      title: "Repayment due soon",
+      body: "Your EasyBuy instalment of ₦160,000 is due on 8 Nov 2026.",
+      source: "easybuy",
+      sourceType: "easybuy.repayment.due",
+      sourceSeq: 1,
+      subjectKey: "easybuy:instalment:item-1:1",
+      readAt: null,
+    });
+    expect((await summary(ada.token)).body).toEqual({ unread: 1, byApp: { "Easybuy Portal": 1 } });
+    expect((await summary(bola.token)).body).toEqual({ unread: 0, byApp: {} });
+  });
+
+  it("keeps each stage of an instalment as its own notice, and a redelivery changes nothing", async () => {
+    const upcoming = reminder(ada.id, "upcoming", 1);
+    const due = reminder(ada.id, "due", 2);
+    const overdue = reminder(ada.id, "overdue", 3);
+    for (const event of [upcoming, due, overdue]) expect((await deliver(event)).body.status).toBe("applied");
+    expect((await deliver(due)).body.status).toBe("duplicate");
+
+    const titles = (await models.NotificationModel.find({ personId: ada.id }).sort({ sourceSeq: 1 }).lean()).map((n) => n.title);
+    expect(titles).toEqual(["Repayment due soon", "Repayment due today", "Repayment overdue"]);
+  });
+
+  it("drops an older stage that arrives after a newer one, but not another instalment's", async () => {
+    expect((await deliver(reminder(ada.id, "due", 2))).body.status).toBe("applied");
+    expect((await deliver(reminder(ada.id, "upcoming", 1))).body.status).toBe("stale");
+    // Instalment 2's first stage has seq 1 too: each instalment counts for itself.
+    expect((await deliver(reminder(ada.id, "upcoming", 1, "item-1", 2))).body.status).toBe("applied");
+    expect(await models.NotificationModel.countDocuments({ personId: ada.id })).toBe(2);
+  });
+
+  it("stores a reminder that arrives long after it was written as already read", async () => {
+    const late = { ...reminder(ada.id, "due", 1), occurredAt: new Date(Date.now() - 2 * 86_400_000).toISOString() };
+    expect((await deliver(late)).body.status).toBe("applied");
+    expect((await models.NotificationModel.findById(late.eventId).lean())?.readAt).toBeInstanceOf(Date);
+    expect((await summary(ada.token)).body).toEqual({ unread: 0, byApp: {} });
+  });
+
+  it("dead-letters a reminder with a float amount, so the relay stops retrying it", async () => {
+    const poison = { ...reminder(ada.id, "due", 1), data: { itemId: "item-1", personId: ada.id, instalment: 1, dueOn: "2026-11-08", amountKobo: 1600.5, stage: "due" } };
+    const res = await deliver(poison);
+    expect(res.status).toBe(200);
+    expect(res.body.status).toBe("dead_lettered");
+    expect(await models.NotificationModel.countDocuments({})).toBe(0);
   });
 });
 

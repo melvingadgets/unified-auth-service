@@ -77,7 +77,7 @@ See [.env.example](.env.example) for all available configuration.
 
 | Method | Path | Description |
 |--------|------|-------------|
-| POST | `/internal/events` | Relay-signed event delivery (service token `events:deliver` + JWS over the body). Creates in-app notifications. See `Shortwork/docs/notifications.md`. |
+| POST | `/internal/events` | Relay-signed event delivery (service token `events:deliver` + JWS over the body). Creates in-app notifications, including EasyBuy repayment reminders. See `Shortwork/docs/notifications.md`. |
 
 ### Admin (requires Admin or SuperAdmin role)
 

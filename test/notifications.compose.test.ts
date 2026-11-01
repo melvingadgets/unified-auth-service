@@ -3,6 +3,7 @@ import {
   createEvent,
   easybuyItemCreated,
   easybuyPaymentApproved,
+  easybuyRepaymentDue,
   easybuyRequestApproved,
   easybuyRequestRejected,
   easybuyRequestSubmitted,
@@ -13,7 +14,7 @@ import {
   storeOrderPaid,
   type EventEnvelope,
 } from "@melvingadgets/platform-kit";
-import { composeNotification, formatNaira } from "../Notifications/compose.js";
+import { composeNotification, formatDueDate, formatNaira } from "../Notifications/compose.js";
 
 // Unit tests for the text each event becomes (Shortwork/docs/notifications.md §3). Events are
 // built with the kit's own createEvent, so every envelope here passes the real contract.
@@ -92,6 +93,12 @@ const events = {
   }),
 };
 
+const reminder = (stage: "upcoming" | "due" | "overdue", amountKobo = 16_000_000, dueOn = "2026-11-08") =>
+  createEvent(easybuyRepaymentDue, {
+    ...meta("instalment", "item-1:2"),
+    data: { itemId: "item-1", personId: PERSON, instalment: 2, dueOn, amountKobo, stage },
+  });
+
 const cancelled = (reason: "rejected_at_delivery" | "cancelled" | "refunded") =>
   createEvent(storeOrderCancelled, { ...meta("order", "ord-1"), data: { orderId: "ord-1", personId: PERSON, reason } });
 
@@ -106,6 +113,27 @@ describe("formatNaira", () => {
 
   it("refuses a fractional kobo amount instead of rounding it silently", () => {
     expect(() => formatNaira(10.5)).toThrow();
+  });
+});
+
+describe("formatDueDate", () => {
+  it("writes a calendar date plainly, with no leading zero", () => {
+    expect(formatDueDate("2026-11-08")).toBe("8 Nov 2026");
+    expect(formatDueDate("2027-01-31")).toBe("31 Jan 2027");
+    expect(formatDueDate("2028-02-29")).toBe("29 Feb 2028");
+    expect(formatDueDate("2026-12-01")).toBe("1 Dec 2026");
+  });
+
+  it("gives the same day in any server timezone, because it never builds a Date", () => {
+    const was = process.env.TZ;
+    try {
+      for (const zone of ["Pacific/Honolulu", "Pacific/Kiritimati", "UTC"]) {
+        process.env.TZ = zone;
+        expect(formatDueDate("2026-11-08")).toBe("8 Nov 2026");
+      }
+    } finally {
+      process.env.TZ = was;
+    }
   });
 });
 
@@ -134,6 +162,34 @@ describe("composeNotification", () => {
       title: "Payment confirmed",
       body: "We received your EasyBuy payment of ₦25,000.50. Thank you.",
     });
+  });
+
+  it("reminds about a repayment with its naira amount and due date, in the EasyBuy portal", () => {
+    expect(composeNotification(reminder("upcoming"))).toEqual({
+      personId: PERSON,
+      category: "easybuy.finance",
+      app: "Easybuy Portal",
+      title: "Repayment due soon",
+      body: "Your EasyBuy instalment of ₦160,000 is due on 8 Nov 2026.",
+    });
+    expect(composeNotification(reminder("due"))).toEqual({
+      personId: PERSON,
+      category: "easybuy.finance",
+      app: "Easybuy Portal",
+      title: "Repayment due today",
+      body: "Your EasyBuy instalment of ₦160,000 is due today, 8 Nov 2026.",
+    });
+    expect(composeNotification(reminder("overdue"))).toEqual({
+      personId: PERSON,
+      category: "easybuy.finance",
+      app: "Easybuy Portal",
+      title: "Repayment overdue",
+      body: "Your EasyBuy instalment of ₦160,000 was due on 8 Nov 2026. Please pay as soon as you can.",
+    });
+  });
+
+  it("shows kobo when a part-paid instalment leaves some", () => {
+    expect(composeNotification(reminder("due", 10_000_050))?.body).toBe("Your EasyBuy instalment of ₦100,000.50 is due today, 8 Nov 2026.");
   });
 
   it("counts order quantities, not lines, and opens the store", () => {
@@ -207,7 +263,7 @@ describe("composeNotification", () => {
   });
 
   it("never puts an email, a phone number or a person's name into the text", () => {
-    const all = [...Object.values(events), cancelled("refunded")].map((event) => composeNotification(event));
+    const all = [...Object.values(events), cancelled("refunded"), reminder("upcoming"), reminder("due"), reminder("overdue")].map((event) => composeNotification(event));
     for (const notification of all) {
       expect(notification).not.toBeNull();
       const text = `${notification!.title} ${notification!.body}`;

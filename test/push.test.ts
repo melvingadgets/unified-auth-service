@@ -11,6 +11,7 @@ import {
   createDeliveryVerifier,
   createEvent,
   easybuyPaymentApproved,
+  easybuyRepaymentDue,
   generateSigningKey,
   resellerChatMessagePosted,
 } from "@melvingadgets/platform-kit";
@@ -375,6 +376,35 @@ describe("alerts from events", () => {
       id: event.eventId,
       title: "Payment confirmed",
       body: "We received your EasyBuy payment of ₦25,000. Thank you.",
+      app: "Easybuy Portal",
+      tag: event.eventId,
+    });
+    await expectVapid(hit);
+  });
+
+  it("alerts about a repayment reminder, unless it arrives too late to be news", async () => {
+    const device = newDevice();
+    await subscribe(ada.token, device.subscription);
+    const remind = (id: string) =>
+      createEvent(easybuyRepaymentDue, {
+        subject: { kind: "instalment", id, personId: ada.id },
+        seq: 1,
+        traceId: "trace-push-test",
+        data: { itemId: "item-1", personId: ada.id, instalment: 1, dueOn: "2026-11-08", amountKobo: 16_000_000, stage: "overdue" },
+      });
+
+    const late = { ...remind(`item-${randomUUID().slice(0, 8)}:1`), occurredAt: new Date(Date.now() - 2 * 86_400_000).toISOString() };
+    expect((await deliver(late)).body.status).toBe("applied");
+    await settle();
+    expect(hitsFor(device)).toHaveLength(0);
+
+    const event = remind(`item-${randomUUID().slice(0, 8)}:1`);
+    expect((await deliver(event)).body.status).toBe("applied");
+    const [hit] = await waitForHits(device, 1);
+    expect(decrypt(device, hit.body)).toEqual({
+      id: event.eventId,
+      title: "Repayment overdue",
+      body: "Your EasyBuy instalment of ₦160,000 was due on 8 Nov 2026. Please pay as soon as you can.",
       app: "Easybuy Portal",
       tag: event.eventId,
     });

@@ -46,6 +46,17 @@ export const formatNaira = (amountKobo: number): string => {
   return `${negative ? "-" : ""}₦${grouped}${fraction === "00" ? "" : `.${fraction}`}`;
 };
 
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * "2026-11-08" → "8 Nov 2026". The event carries a calendar date in Africa/Lagos, so this reads its
+ * parts and never builds a Date: a server in another timezone must not move it to another day.
+ */
+export const formatDueDate = (date: string): string => {
+  const [year, month, day] = date.split("-");
+  return `${Number(day)} ${MONTHS[Number(month) - 1]} ${year}`;
+};
+
 const planLabel = (plan: Plan): string => (plan === "Weekly" ? "weekly plan" : "monthly plan");
 const count = (n: number, one: string, many: string): string => `${n} ${n === 1 ? one : many}`;
 
@@ -116,6 +127,18 @@ export const composeNotification = (event: EventEnvelope): NotificationDraft | n
         "Payment confirmed",
         `We received your EasyBuy payment of ${formatNaira(d.amountKobo)}. Thank you.`,
       );
+    }
+    case "easybuy.repayment.due": {
+      const d = event.data as { personId: string; dueOn: string; amountKobo: number; stage: "upcoming" | "due" | "overdue" };
+      const amount = formatNaira(d.amountKobo);
+      const date = formatDueDate(d.dueOn);
+      const [title, body] =
+        d.stage === "upcoming"
+          ? ["Repayment due soon", `Your EasyBuy instalment of ${amount} is due on ${date}.`]
+          : d.stage === "due"
+            ? ["Repayment due today", `Your EasyBuy instalment of ${amount} is due today, ${date}.`]
+            : ["Repayment overdue", `Your EasyBuy instalment of ${amount} was due on ${date}. Please pay as soon as you can.`];
+      return draft(d.personId, "easybuy.finance", "Easybuy Portal", title, body);
     }
     case "store.order.paid": {
       const d = event.data as { personId: string | null; items: { quantity: number }[]; totalKobo: number };

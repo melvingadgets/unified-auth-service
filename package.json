@@ -18,7 +18,7 @@
     "migrate:staff-roles": "tsx scripts/migrate-staff-roles.ts"
   },
   "dependencies": {
-    "@melvingadgets/platform-kit": "0.7.0",
+    "@melvingadgets/platform-kit": "0.8.0",
     "bcrypt": "^5.1.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
