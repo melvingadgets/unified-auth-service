@@ -140,7 +140,9 @@ describe("registration never fails because of mail", () => {
     expect(res.body.code).toBe("ACCOUNT_EXISTS");
     expect(res.body.account).toMatchObject({ originApp: "easybuy", appLabel: "EasyBuy", hasPassword: false });
     expect(res.body.message).toContain("EasyBuy");
-    expect(res.body.message).toMatch(/set a password/i);
+    // Message routes them to a password regardless of this process's mail state; the flag is a boolean.
+    expect(res.body.message).toMatch(/password/i);
+    expect(typeof res.body.resetEmailSent).toBe("boolean");
 
     // The register attempt created nothing new.
     expect(await UserModel.countDocuments({ email })).toBe(1);

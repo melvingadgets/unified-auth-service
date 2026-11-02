@@ -78,12 +78,37 @@ export const RegisterUser = async (req: Request, res: Response) => {
     if (existing) {
       const appLabel = ORIGIN_APP_LABELS[existing.originApp as AuthApp] ?? "Melvin";
       const hasPassword = Boolean(existing.password);
+
+      // A passwordless account (the EasyBuy imports, 2026-11-02) can only get in by setting a
+      // password, and there is no "forgot password" screen in the hub yet — so send the
+      // set-password link here, best-effort, the moment they try to register. It is the same
+      // capability as /forgot-password (this route is rate-limited too) and only ever helps the
+      // real owner. An account that already has a password is told to sign in instead — never an
+      // unsolicited reset for an established login.
+      let resetEmailSent = false;
+      if (!hasPassword && existing.email && isMailConfigured()) {
+        try {
+          const token = await issuePasswordResetToken(existing._id);
+          await sendResetPasswordEmail({
+            to: existing.email,
+            fullName: existing.fullName,
+            resetUrl: buildResetUrl(token),
+          });
+          resetEmailSent = true;
+        } catch (error) {
+          logMailFailure("reset_email_failed", existing._id, error);
+        }
+      }
+
       return res.status(409).json({
         code: "ACCOUNT_EXISTS",
         message: hasPassword
           ? `You already have a Melvin account (from ${appLabel}). Sign in instead, or reset your password if you've forgotten it.`
-          : `You already have a Melvin account from ${appLabel}. Set a password to sign in — we can email you a secure link.`,
+          : resetEmailSent
+            ? `You already have a Melvin account from ${appLabel}. We've emailed you a secure link to set your password and sign in.`
+            : `You already have a Melvin account from ${appLabel}. Reset your password to set one and sign in.`,
         account: { originApp: existing.originApp, appLabel, hasPassword },
+        resetEmailSent,
       });
     }
 
