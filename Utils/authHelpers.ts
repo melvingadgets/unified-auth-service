@@ -379,6 +379,11 @@ export const consumePasswordResetToken = async (token: string, nextPasswordHash:
     {
       $set: {
         password: nextPasswordHash,
+        // The reset link was sent to this account's email, so completing it proves control of
+        // that mailbox — which is email verification. This both enforces "every sign-in is
+        // verified" and lets a passwordless import (imported unverified) get in after setting a
+        // password, instead of being bounced by the verify gate on their first login.
+        emailVerified: true,
       },
       $unset: {
         passwordResetTokenHash: 1,

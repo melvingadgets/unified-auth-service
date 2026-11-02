@@ -191,8 +191,22 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
     }
 
     const user = await findUserByIdentifier(identifier);
+
+    // A passwordless account (the EasyBuy imports) can't sign in until a password is set. Tell the
+    // client so it can offer to email a set-password link, instead of a dead "invalid credentials".
+    // This reveals the email is a claimable imported account — the disclosure the owner chose for
+    // recognition; a wrong password on a normal account still gets the neutral answer below.
+    if (user && !user.password) {
+      const appLabel = ORIGIN_APP_LABELS[user.originApp as AuthApp] ?? "Melvin";
+      return res.status(409).json({
+        code: "PASSWORD_SETUP_REQUIRED",
+        message: `This ${appLabel} account doesn't have a password yet — we can email you a secure link to set one.`,
+        account: { originApp: user.originApp, appLabel, hasPassword: false },
+      });
+    }
+
     const validPassword = await comparePassword(password, user?.password ? String(user.password) : await UNUSED_PASSWORD_HASH);
-    if (!user || !user.password || !validPassword) {
+    if (!user || !validPassword) {
       return res.status(401).json(INVALID_CREDENTIALS);
     }
 

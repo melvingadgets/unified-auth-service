@@ -157,6 +157,39 @@ describe("registration never fails because of mail", () => {
     expect(res.text).not.toContain("anything");
   }, 30_000);
 
+  it("on sign-in, tells a passwordless import to set a password instead of a dead 'invalid credentials'", async () => {
+    const email = emailOf("pwless-login");
+    await UserModel.create({ email, fullName: "Ada Eze", role: "User", emailVerified: true, disabled: false, originApp: "easybuy" });
+
+    const res = await request(app).post("/api/v1/auth/login").send({ email, password: "anything-they-type" });
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("PASSWORD_SETUP_REQUIRED");
+    expect(res.body.account).toMatchObject({ originApp: "easybuy", appLabel: "EasyBuy", hasPassword: false });
+  }, 30_000);
+
+  it("keeps the neutral answer for a wrong password on a normal account (no enumeration)", async () => {
+    const email = emailOf("wrongpw");
+    expect((await register(email)).status).toBe(201);
+
+    const res = await request(app).post("/api/v1/auth/login").send({ email, password: "DefinitelyWrong1!" });
+    expect(res.status).toBe(401);
+    expect(res.body.code).toBeUndefined();
+    expect(res.body.message).toMatch(/invalid credentials/i);
+  }, 30_000);
+
+  it("a completed password reset also verifies the email", async () => {
+    const { issuePasswordResetToken } = await import("../Utils/authHelpers.js");
+    const email = emailOf("reset-verify");
+    const created = await UserModel.create({ email, fullName: "Uche M", role: "User", emailVerified: false, disabled: false, originApp: "easybuy" });
+
+    const token = await issuePasswordResetToken(String(created._id));
+    const res = await request(app).post("/api/v1/auth/reset-password").send({ token, password: "BrandNewPass1!" });
+    expect(res.status).toBe(200);
+
+    const row = await UserModel.findOne({ email }).lean();
+    expect(row?.emailVerified).toBe(true);
+  }, 30_000);
+
   it("never leaves the account unusable without saying why", async () => {
     const email = emailOf("state");
     await register(email);
