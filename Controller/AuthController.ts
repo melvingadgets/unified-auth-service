@@ -229,7 +229,7 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
           logMailFailure("verification_resend_failed", user._id, error);
         }
       }
-      return res.status(403).json({ message: "please check your email to verify account" });
+      return res.status(403).json({ code: "EMAIL_NOT_VERIFIED", message: "please check your email to verify account" });
     }
 
     const session = await createSessionForUser({

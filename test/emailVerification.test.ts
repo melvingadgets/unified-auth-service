@@ -82,6 +82,8 @@ describe("a newer verification e-mail does not void an older one", () => {
     const early = await login(email);
     expect(early.status).toBe(403);
     expect(early.body.message).toContain("verify account");
+    // The client keys the "check your email" screen off this code, not the prose.
+    expect(early.body.code).toBe("EMAIL_NOT_VERIFIED");
 
     const [first, second] = linksTo(email);
     expect(second).toBeDefined();
