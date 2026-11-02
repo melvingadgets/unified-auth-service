@@ -160,22 +160,30 @@ async function run() {
     console.log(`[import] unique people (by email): ${planned.length}; with a valid phone: ${uniquePhones.size}; skipped (no email): ${skippedNoEmail}`);
 
     // ---- 2. Classify against auth: insert vs merge ----------------------------------------
-    let wouldInsert = 0, wouldMerge = 0;
+    let wouldInsert = 0, wouldMerge = 0, wouldPromote = 0;
     const sample = [];
     for (const p of planned) {
-      const existing = await authUsers.findOne({ email: p.email }, { projection: { _id: 1 } });
+      const existing = await authUsers.findOne({ email: p.email }, { projection: { _id: 1, role: 1 } });
       p._action = existing ? "merge" : "insert";
       p._existingId = existing ? existing._id : null;
-      if (existing) wouldMerge++; else wouldInsert++;
+      p._existingRole = existing ? (existing.role || "User") : null;
+      if (existing) {
+        wouldMerge++;
+        // Upgrade a merged account whose legacy (EasyBuy) role outranks its current auth role;
+        // never downgrade (owner: imports must retain their former roles).
+        if ((ROLE_RANK[p.role] || 1) > (ROLE_RANK[p._existingRole] || 1)) wouldPromote++;
+      } else {
+        wouldInsert++;
+      }
       if (sample.length < 8) {
-        sample.push(`    ${p._action.padEnd(6)} ${maskEmail(p.email)}  ${maskPhone(p.phone)}  role=${p.role} verified=${p.emailVerified} src=${[...p.sources].join("+")}`);
+        sample.push(`    ${p._action.padEnd(6)} ${maskEmail(p.email)}  ${maskPhone(p.phone)}  role=${p.role}${p._existingRole && p._existingRole !== p.role ? ` (was ${p._existingRole})` : ""} verified=${p.emailVerified} src=${[...p.sources].join("+")}`);
       }
     }
-    console.log(`[import] plan: insert=${wouldInsert}, merge(existing)=${wouldMerge}`);
+    console.log(`[import] plan: insert=${wouldInsert}, merge(existing)=${wouldMerge}, role-upgrades=${wouldPromote}`);
     console.log(`[import] sample (sanitized):\n${sample.join("\n")}`);
 
     if (DRY_RUN) {
-      console.log(`[import] DRY RUN — no writes. SUMMARY ${JSON.stringify({ mode: "dry", beforeCount, sourceUsers: legacyUsers.length, sourceRequests: requests.length, uniquePeople: planned.length, uniquePhones: uniquePhones.size, wouldInsert, wouldMerge, skippedNoEmail })}`);
+      console.log(`[import] DRY RUN — no writes. SUMMARY ${JSON.stringify({ mode: "dry", beforeCount, sourceUsers: legacyUsers.length, sourceRequests: requests.length, uniquePeople: planned.length, uniquePhones: uniquePhones.size, wouldInsert, wouldMerge, wouldPromote, skippedNoEmail })}`);
       return;
     }
 
@@ -188,7 +196,7 @@ async function run() {
     await authProfiles.aggregate([{ $match: {} }, { $out: profilesBak }]).toArray();
     console.log(`[import] backup complete (${await auth.collection(usersBak).countDocuments()} users, ${await auth.collection(profilesBak).countDocuments()} profiles).`);
 
-    let inserted = 0, merged = 0, phoneDropped = 0, errors = 0;
+    let inserted = 0, merged = 0, phoneDropped = 0, errors = 0, rolePromoted = 0;
     const usedPhones = new Set(); // proactively avoid within-run phone collisions
     const now = new Date();
 
@@ -198,6 +206,11 @@ async function run() {
         if (p._action === "merge") {
           const $set = { updatedAt: now };
           if (p.legacyEasybuyId) $set["legacyIds.easybuy"] = p.legacyEasybuyId;
+          // Upgrade to the stronger role; never downgrade (owner: imports keep their former roles).
+          if ((ROLE_RANK[p.role] || 1) > (ROLE_RANK[p._existingRole || "User"] || 1)) {
+            $set.role = p.role;
+            rolePromoted++;
+          }
           await authUsers.updateOne({ _id: authId }, { $set });
           merged++;
         } else {
