@@ -162,6 +162,7 @@ async function run() {
     // ---- 2. Classify against auth: insert vs merge ----------------------------------------
     let wouldInsert = 0, wouldMerge = 0, wouldPromote = 0;
     const sample = [];
+    const promotions = [];
     for (const p of planned) {
       const existing = await authUsers.findOne({ email: p.email }, { projection: { _id: 1, role: 1 } });
       p._action = existing ? "merge" : "insert";
@@ -171,7 +172,10 @@ async function run() {
         wouldMerge++;
         // Upgrade a merged account whose legacy (EasyBuy) role outranks its current auth role;
         // never downgrade (owner: imports must retain their former roles).
-        if ((ROLE_RANK[p.role] || 1) > (ROLE_RANK[p._existingRole] || 1)) wouldPromote++;
+        if ((ROLE_RANK[p.role] || 1) > (ROLE_RANK[p._existingRole] || 1)) {
+          wouldPromote++;
+          promotions.push(`    ${maskEmail(p.email)}  ${maskPhone(p.phone)}  ${p._existingRole} -> ${p.role}  src=${[...p.sources].join("+")}`);
+        }
       } else {
         wouldInsert++;
       }
@@ -181,6 +185,7 @@ async function run() {
     }
     console.log(`[import] plan: insert=${wouldInsert}, merge(existing)=${wouldMerge}, role-upgrades=${wouldPromote}`);
     console.log(`[import] sample (sanitized):\n${sample.join("\n")}`);
+    if (promotions.length) console.log(`[import] ALL role-upgrades (sanitized):\n${promotions.join("\n")}`);
 
     if (DRY_RUN) {
       console.log(`[import] DRY RUN — no writes. SUMMARY ${JSON.stringify({ mode: "dry", beforeCount, sourceUsers: legacyUsers.length, sourceRequests: requests.length, uniquePeople: planned.length, uniquePhones: uniquePhones.size, wouldInsert, wouldMerge, wouldPromote, skippedNoEmail })}`);
