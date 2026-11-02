@@ -13,6 +13,7 @@ import {
   RegisterUser,
   ResendVerificationEmail,
   ResetPassword,
+  ResetPasswordPage,
   RevokeMySession,
   UpdateMyPassword,
   UpdateMyProfile,
@@ -35,6 +36,8 @@ router.post("/google", authRateLimiter, GoogleLogin);
 router.get("/verify-email/:token", VerifyEmail);
 router.post("/resend-verification", authRateLimiter, ResendVerificationEmail);
 router.post("/forgot-password", authRateLimiter, ForgotPassword);
+// The page behind the reset-email link (GET), then the API that completes it (POST).
+router.get("/reset-password", ResetPasswordPage);
 router.post("/reset-password", authRateLimiter, ResetPassword);
 router.get("/me", verifyToken, GetMe);
 router.patch("/me/profile", verifyToken, UpdateMyProfile);

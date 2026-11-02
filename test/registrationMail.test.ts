@@ -111,10 +111,48 @@ describe("registration never fails because of mail", () => {
   it("leaves exactly one account, so a retry is a duplicate and not a second row", async () => {
     const email = emailOf("dupe");
     expect((await register(email)).status).toBe(201);
-    expect((await register(email)).status).toBe(409);
+    const dupe = await register(email);
+    expect(dupe.status).toBe(409);
+    // Recognise the returning person rather than a flat "email in use". A fresh account's
+    // originApp defaults to auth-service ("Melvin") and it has a password.
+    expect(dupe.body.code).toBe("ACCOUNT_EXISTS");
+    expect(dupe.body.account).toMatchObject({ appLabel: "Melvin", hasPassword: true });
 
     const rows = await UserModel.find({ email }).lean();
     expect(rows).toHaveLength(1);
+  }, 30_000);
+
+  it("names the origin app and tells a passwordless import to set a password", async () => {
+    // A passwordless EasyBuy import, as migrations/import-easybuy-identities.cjs creates them.
+    const email = emailOf("imported");
+    await UserModel.create({
+      email,
+      fullName: "Chidi Nwosu",
+      role: "User",
+      emailVerified: true,
+      disabled: false,
+      originApp: "easybuy",
+      // no password -> passwordless -> must set one (via reset) to sign in
+    });
+
+    const res = await register(email);
+    expect(res.status).toBe(409);
+    expect(res.body.code).toBe("ACCOUNT_EXISTS");
+    expect(res.body.account).toMatchObject({ originApp: "easybuy", appLabel: "EasyBuy", hasPassword: false });
+    expect(res.body.message).toContain("EasyBuy");
+    expect(res.body.message).toMatch(/set a password/i);
+
+    // The register attempt created nothing new.
+    expect(await UserModel.countDocuments({ email })).toBe(1);
+  }, 30_000);
+
+  it("serves the password-reset page behind the email link (GET /reset-password)", async () => {
+    const res = await request(app).get("/api/v1/auth/reset-password?token=anything");
+    expect(res.status).toBe(200);
+    expect(res.headers["content-type"]).toMatch(/html/);
+    expect(res.text).toContain("Set your password");
+    // The token must not be reflected into the HTML (no reflected-XSS surface).
+    expect(res.text).not.toContain("anything");
   }, 30_000);
 
   it("never leaves the account unusable without saying why", async () => {

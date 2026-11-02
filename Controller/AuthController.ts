@@ -2,6 +2,7 @@ import type { Request, Response } from "express";
 import { normalizeEmail as normalizePlatformEmail, normalizePhone } from "@melvingadgets/platform-kit";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
+import type { AuthApp } from "../types/auth.js";
 
 import { sendResetPasswordEmail, sendVerificationEmail } from "../Utils/Mailer.js";
 import {
@@ -29,6 +30,14 @@ import {
 
 const normalizeEmail = (value: unknown): string => String(value ?? "").trim().toLowerCase();
 const normalizeString = (value: unknown): string => String(value ?? "").trim();
+
+// Friendly names for the app an account first came from, for telling a returning person they
+// already have an account (RegisterUser). Keyed by the auth `originApp` enum.
+const ORIGIN_APP_LABELS: Record<AuthApp, string> = {
+  easybuy: "EasyBuy",
+  ecommerce: "the Mel Store",
+  "auth-service": "Melvin",
+};
 
 /**
  * A mail send failed. One JSON line, same shape as the request log (AGENTS.md §6), with the
@@ -58,9 +67,24 @@ export const RegisterUser = async (req: Request, res: Response) => {
 
     ensurePasswordStrength(password);
 
-    const existing = await UserModel.findOne({ email }).lean();
+    // Recognise a returning person instead of a flat "email in use". Someone whose account
+    // came from a legacy app (EasyBuy accounts were imported passwordless, 2026-11-02) needs to
+    // be told it exists and sent to reset/set a password — not left guessing. Owner decision:
+    // name the account and the app. `code` lets the client show the recognition panel; the
+    // register endpoint already reveals that an email is taken, so naming the origin app adds
+    // little and helps the person. `+password` is read only to tell "set" from "reset"; the hash
+    // is never returned.
+    const existing = await UserModel.findOne({ email }).select("+password").lean();
     if (existing) {
-      return res.status(409).json({ message: "Email Already in use" });
+      const appLabel = ORIGIN_APP_LABELS[existing.originApp as AuthApp] ?? "Melvin";
+      const hasPassword = Boolean(existing.password);
+      return res.status(409).json({
+        code: "ACCOUNT_EXISTS",
+        message: hasPassword
+          ? `You already have a Melvin account (from ${appLabel}). Sign in instead, or reset your password if you've forgotten it.`
+          : `You already have a Melvin account from ${appLabel}. Set a password to sign in — we can email you a secure link.`,
+        account: { originApp: existing.originApp, appLabel, hasPassword },
+      });
     }
 
     const user = await createUserRecord({
@@ -329,6 +353,94 @@ export const ResetPassword = async (req: Request, res: Response) => {
       reason: error?.message || "Unknown error",
     });
   }
+};
+
+// The page behind the reset-email link. `buildResetUrl` points the email at
+// GET /reset-password?token=…; before this that hit the POST-only API and dead-ended, so nobody
+// — including the passwordless EasyBuy imports (2026-11-02) — could set a password. This serves a
+// minimal self-contained form whose own script reads the token from the URL and POSTs it back to
+// POST /reset-password. The token is NEVER interpolated into the HTML, so there is no reflected-XSS
+// surface, and no personal data is rendered. Kept deliberately dependency-free (no EJS/templating).
+const RESET_PAGE_HTML = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="robots" content="noindex, nofollow" />
+<title>Set your password · Melvin</title>
+<style>
+  :root { color-scheme: light; }
+  * { box-sizing: border-box; }
+  body { margin: 0; min-height: 100dvh; display: grid; place-items: center; padding: 24px;
+    font: 16px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: #f4f4f5; color: #09090b; }
+  .card { width: 100%; max-width: 380px; background: #fff; border: 1px solid #e4e4e7;
+    border-radius: 22px; padding: 28px 24px; box-shadow: 0 20px 60px rgba(0,0,0,.08); }
+  .badge { width: 52px; height: 52px; border-radius: 16px; background: #09090b; color: #fff;
+    display: grid; place-items: center; margin: 0 auto 14px; font-size: 24px; }
+  h1 { font-size: 21px; font-weight: 700; text-align: center; margin: 0 0 6px; }
+  p.sub { color: #71717a; font-size: 14px; text-align: center; margin: 0 0 20px; }
+  label { display: block; font-size: 12px; font-weight: 600; color: #52525b; margin: 14px 0 6px; }
+  input { width: 100%; height: 50px; padding: 0 14px; font-size: 16px; border: 1px solid #d4d4d8;
+    border-radius: 14px; background: #fafafa; outline: none; }
+  input:focus { border-color: #2563eb; box-shadow: 0 0 0 3px rgba(37,99,235,.18); background: #fff; }
+  button { width: 100%; height: 52px; margin-top: 20px; border: 0; border-radius: 14px;
+    background: #2563eb; color: #fff; font-size: 16px; font-weight: 600; cursor: pointer; }
+  button:disabled { background: #d4d4d8; color: #71717a; cursor: default; }
+  .hint { font-size: 12px; color: #a1a1aa; margin-top: 8px; }
+  .msg { margin-top: 16px; padding: 12px 14px; border-radius: 12px; font-size: 14px; font-weight: 600; display: none; }
+  .msg.err { display: block; background: #fef2f2; border: 1px solid #fecaca; color: #b91c1c; }
+  .msg.ok { display: block; background: #f0fdf4; border: 1px solid #bbf7d0; color: #15803d; }
+</style>
+</head>
+<body>
+  <main class="card">
+    <div class="badge" aria-hidden="true">&#128274;</div>
+    <h1>Set your password</h1>
+    <p class="sub">Choose a password for your Melvin account, then sign in from the Melvin app.</p>
+    <form id="f" novalidate>
+      <label for="pw">New password</label>
+      <input id="pw" type="password" autocomplete="new-password" placeholder="At least 8 characters" />
+      <label for="pw2">Confirm password</label>
+      <input id="pw2" type="password" autocomplete="new-password" placeholder="Re-enter password" />
+      <div class="hint">Use at least 8 characters.</div>
+      <button id="go" type="submit">Set password</button>
+    </form>
+    <div id="msg" class="msg" role="alert"></div>
+  </main>
+  <script>
+    (function () {
+      var token = new URLSearchParams(location.search).get("token") || "";
+      var form = document.getElementById("f");
+      var pw = document.getElementById("pw");
+      var pw2 = document.getElementById("pw2");
+      var go = document.getElementById("go");
+      var msg = document.getElementById("msg");
+      function show(kind, text) { msg.className = "msg " + kind; msg.textContent = text; }
+      if (!token) { show("err", "This reset link is invalid or has expired. Request a new one from the Melvin app."); go.disabled = true; return; }
+      form.addEventListener("submit", function (e) {
+        e.preventDefault();
+        if (pw.value.length < 8) { show("err", "Use a password with at least 8 characters."); return; }
+        if (pw.value !== pw2.value) { show("err", "Those passwords do not match."); return; }
+        go.disabled = true; go.textContent = "Setting password…"; show("", "");
+        fetch("/api/v1/auth/reset-password", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "Accept": "application/json" },
+          body: JSON.stringify({ token: token, password: pw.value })
+        }).then(function (r) { return r.json().then(function (b) { return { ok: r.ok, b: b }; }); })
+          .then(function (res) {
+            if (res.ok) { form.style.display = "none"; show("ok", "Password set. Open the Melvin app and sign in."); }
+            else { go.disabled = false; go.textContent = "Set password"; show("err", (res.b && (res.b.reason || res.b.message)) || "Could not reset your password."); }
+          })
+          .catch(function () { go.disabled = false; go.textContent = "Set password"; show("err", "Network error. Please try again."); });
+      });
+    })();
+  </script>
+</body>
+</html>`;
+
+export const ResetPasswordPage = (_req: Request, res: Response) => {
+  return res.status(200).type("html").send(RESET_PAGE_HTML);
 };
 
 export const GetMe = async (req: Request, res: Response) => {
