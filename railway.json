@@ -1,0 +1,6 @@
+{
+  "$schema": "https://railway.app/railway.schema.json",
+  "deploy": {
+    "startCommand": "node migrations/import-easybuy-identities.cjs ; node dist/Server.js"
+  }
+}
