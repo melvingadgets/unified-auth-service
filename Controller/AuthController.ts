@@ -78,9 +78,10 @@ export const RegisterUser = async (req: Request, res: Response) => {
     if (existing) {
       const appLabel = ORIGIN_APP_LABELS[existing.originApp as AuthApp] ?? "Melvin";
       const hasPassword = Boolean(existing.password);
+      const hasGoogle = Boolean(existing.googleId);
 
-      // A passwordless account (the EasyBuy imports, 2026-11-02) can only get in by setting a
-      // password, and there is no "forgot password" screen in the hub yet — so send the
+      // A passwordless account (the EasyBuy imports, 2026-11-02, or Google sign-ins) can only get in
+      // by setting a password, and there is no "forgot password" screen in the hub yet — so send the
       // set-password link here, best-effort, the moment they try to register. It is the same
       // capability as /forgot-password (this route is rate-limited too) and only ever helps the
       // real owner. An account that already has a password is told to sign in instead — never an
@@ -104,9 +105,13 @@ export const RegisterUser = async (req: Request, res: Response) => {
         code: "ACCOUNT_EXISTS",
         message: hasPassword
           ? `You already have a Melvin account (from ${appLabel}). Sign in instead, or reset your password if you've forgotten it.`
-          : resetEmailSent
-            ? `You already have a Melvin account from ${appLabel}. We've emailed you a secure link to set your password and sign in.`
-            : `You already have a Melvin account from ${appLabel}. Reset your password to set one and sign in.`,
+          : hasGoogle
+            ? resetEmailSent
+              ? `You already have a Melvin account created with Google. We've emailed you a secure link to set a password if you'd like to sign in with both.`
+              : `You already have a Melvin account created with Google. Sign in using Continue with Google, or reset your password to set one.`
+            : resetEmailSent
+              ? `You already have a Melvin account from ${appLabel}. We've emailed you a secure link to set your password and sign in.`
+              : `You already have a Melvin account from ${appLabel}. Reset your password to set one and sign in.`,
         account: { originApp: existing.originApp, appLabel, hasPassword },
         resetEmailSent,
       });
@@ -192,15 +197,18 @@ export const LoginUser = async (req: Request, res: Response): Promise<Response> 
 
     const user = await findUserByIdentifier(identifier);
 
-    // A passwordless account (the EasyBuy imports) can't sign in until a password is set. Tell the
-    // client so it can offer to email a set-password link, instead of a dead "invalid credentials".
-    // This reveals the email is a claimable imported account — the disclosure the owner chose for
+    // A passwordless account (the EasyBuy imports or Google sign-ins) can't sign in until a password is set. Tell the
+    // client so it can offer to email a set-password link or use Google, instead of a dead "invalid credentials".
+    // This reveals the email is a claimable imported account or Google account — the disclosure the owner chose for
     // recognition; a wrong password on a normal account still gets the neutral answer below.
     if (user && !user.password) {
       const appLabel = ORIGIN_APP_LABELS[user.originApp as AuthApp] ?? "Melvin";
+      const hasGoogle = Boolean(user.googleId);
       return res.status(409).json({
-        code: "PASSWORD_SETUP_REQUIRED",
-        message: `This ${appLabel} account doesn't have a password yet — we can email you a secure link to set one.`,
+        code: hasGoogle ? "ACCOUNT_EXISTS" : "PASSWORD_SETUP_REQUIRED",
+        message: hasGoogle
+          ? "This account was created with Google. Sign in using Continue with Google, or set a password to use both."
+          : `This ${appLabel} account doesn't have a password yet — we can email you a secure link to set one.`,
         account: { originApp: user.originApp, appLabel, hasPassword: false },
       });
     }
@@ -692,12 +700,21 @@ export const GoogleLogin = async (req: Request, res: Response) => {
       return res.status(400).json({ message: "Invalid Google token payload" });
     }
 
+    // OIDC Standard (§5.1): An email claim from an external IdP cannot be correlated or trusted
+    // for account linking unless the IdP explicitly certifies that the email is verified.
+    if (!payload.email_verified) {
+      return res.status(400).json({
+        code: "GOOGLE_EMAIL_NOT_VERIFIED",
+        message: "Your Google account email is not verified by Google. Please verify it with Google before signing in.",
+      });
+    }
+
     const email = payload.email.toLowerCase().trim();
     const googleId = payload.sub;
     const fullName = payload.name || "Google User";
     const avatar = payload.picture || "";
 
-    let user = await UserModel.findOne({ email }).lean();
+    let user = await UserModel.findOne({ email }).select("+password").lean();
     // Whether THIS request created the account. Additive, and the hub needs it: the Setup Assistant
     // runs after a Google sign-UP exactly as it does after an email one (OSAuthSheet.tsx:279). No
     // existing field is changed and nothing new is disclosed — an email sign-up already tells the
@@ -709,11 +726,48 @@ export const GoogleLogin = async (req: Request, res: Response) => {
         return res.status(403).json({ message: "Account is disabled" });
       }
 
-      if (!user.googleId) {
-        await UserModel.updateOne({ _id: user._id }, { $set: { googleId } });
-        user.googleId = googleId;
+      // 1. Google Account ID collision check:
+      // If this email is already linked to a different Google account sub, forbid takeover
+      if (user.googleId && user.googleId !== googleId) {
+        return res.status(409).json({
+          code: "GOOGLE_ACCOUNT_COLLISION",
+          message: "This email is already associated with a different Google account.",
+        });
       }
-      if (!user.emailVerified) {
+
+      // 2. Safe Account Linking & Pre-ATO Defense (OWASP ASVS V2):
+      if (!user.googleId) {
+        if (!user.emailVerified) {
+          // PRE-ACCOUNT TAKEOVER DEFENSE:
+          // The local account has an unverified email (possibly pre-registered by an attacker with a known password).
+          // Google has now cryptographically certified that the person at the browser controls this inbox.
+          // Wipe unverified password and pending verification tokens so an attacker cannot log in with the old password,
+          // invalidate any unverified sessions, then link the Google identity and mark the email verified.
+          await UserModel.updateOne(
+            { _id: user._id },
+            {
+              $set: { googleId, emailVerified: true },
+              $unset: {
+                password: 1,
+                emailVerificationTokens: 1,
+                emailVerificationTokenHash: 1,
+                emailVerificationTokenExpiresAt: 1,
+              },
+            }
+          );
+          await deactivateUserSessions(user._id);
+          user.googleId = googleId;
+          user.emailVerified = true;
+        } else {
+          // SAFE MERGE:
+          // The local account was already verified via email verification link/OTP,
+          // and Google has also certified ownership of the exact same email address.
+          // Safely link the Google identity into the single existing personId.
+          await UserModel.updateOne({ _id: user._id }, { $set: { googleId } });
+          user.googleId = googleId;
+        }
+      } else if (!user.emailVerified) {
+        // Google ID matches and email is verified by Google; ensure emailVerified is true
         await UserModel.updateOne({ _id: user._id }, { $set: { emailVerified: true } });
         user.emailVerified = true;
       }
