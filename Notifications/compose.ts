@@ -5,7 +5,7 @@ import { kobo, koboToNaira, type EventEnvelope } from "@melvingadgets/platform-k
 // The text carries product names and amounts, never a name, an email, a phone number, a NIN, a
 // free-text reason or message content. The person reads the rest in the app it opens.
 
-export const NOTIFICATION_APPS = ["Profile", "Easybuy Portal", "Recommerce Store", "Reseller", "Chat"] as const;
+export const NOTIFICATION_APPS = ["Profile", "Easybuy Portal", "Store", "Reseller", "Chat"] as const;
 export type NotificationApp = (typeof NOTIFICATION_APPS)[number];
 
 export type NotificationCategory = "easybuy.application" | "easybuy.finance" | "store.order" | "reseller.payout" | "reseller.chat";
@@ -146,7 +146,7 @@ export const composeNotification = (event: EventEnvelope): NotificationDraft | n
       return draft(
         d.personId,
         "store.order",
-        "Recommerce Store",
+        "Store",
         "Order confirmed",
         `Your order of ${count(items, "item", "items")} is paid: ${formatNaira(d.totalKobo)}.`,
       );
@@ -156,7 +156,7 @@ export const composeNotification = (event: EventEnvelope): NotificationDraft | n
       return draft(
         d.personId,
         "store.order",
-        "Recommerce Store",
+        "Store",
         "Order delivered",
         "Your order is complete. Thanks for shopping with Melvin Gadgets.",
       );
@@ -169,7 +169,7 @@ export const composeNotification = (event: EventEnvelope): NotificationDraft | n
           : d.reason === "rejected_at_delivery"
             ? ["Order returned", "Your order was returned at delivery."]
             : ["Order cancelled", "Your order was cancelled."];
-      return draft(d.personId, "store.order", "Recommerce Store", title, body);
+      return draft(d.personId, "store.order", "Store", title, body);
     }
     case "reseller.payout.paid": {
       const d = event.data as { resellerPersonId: string; totalKobo: number; entryCount: number };

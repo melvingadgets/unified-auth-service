@@ -195,11 +195,11 @@ describe("composeNotification", () => {
   it("counts order quantities, not lines, and opens the store", () => {
     expect(composeNotification(events.orderPaid)).toMatchObject({
       category: "store.order",
-      app: "Recommerce Store",
+      app: "Store",
       title: "Order confirmed",
       body: "Your order of 3 items is paid: ₦625,500.",
     });
-    expect(composeNotification(events.orderCompleted)).toMatchObject({ app: "Recommerce Store", title: "Order delivered" });
+    expect(composeNotification(events.orderCompleted)).toMatchObject({ app: "Store", title: "Order delivered" });
   });
 
   it("names how an order ended", () => {
