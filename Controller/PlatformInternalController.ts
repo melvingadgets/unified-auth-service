@@ -1,6 +1,7 @@
 import type { Request, Response } from "express";
 import mongoose from "mongoose";
 import { normalizeEmail, normalizePhone } from "@melvingadgets/platform-kit";
+import ProfileModel from "../Model/ProfileModel.js";
 import SessionModel from "../Model/SessionModel.js";
 import UserModel from "../Model/UserModel.js";
 
@@ -48,7 +49,13 @@ export const GetPerson = async (req: Request, res: Response) => {
   if (!mongoose.isValidObjectId(personId)) return res.status(404).json({ message: "person not found" });
   const user = await UserModel.findById(personId).lean();
   if (!user) return res.status(404).json({ message: "person not found" });
-  return res.status(200).json(toPerson(user));
+  let phone = user.phone || null;
+  if (!phone) {
+    const profile = await ProfileModel.findOne({ user: personId }).select({ phoneNumber: 1 }).lean();
+    const raw = String(profile?.phoneNumber ?? "").trim();
+    phone = (raw ? normalizePhone(raw) : null) || raw || null;
+  }
+  return res.status(200).json(toPerson({ ...user, phone }));
 };
 
 // Exact match on a normalised email or a verified phone; used to link a service's own

@@ -133,14 +133,16 @@ describe("login", () => {
     await createUser({ email: "unverified-phone@example.com", phone: "+2348039998888", phoneVerified: false });
   });
 
-  it("gives the same answer for an unknown account, a wrong password and a Google-only account", async () => {
+  it("gives 401 for an unknown account and a wrong password, and 409 for a passwordless Google account", async () => {
     const unknown = await login("nobody@example.com");
     const wrongPassword = await login("ada@example.com", "not the password");
-    const googleOnly = await login("google-only@example.com");
-    for (const res of [unknown, wrongPassword, googleOnly]) {
+    for (const res of [unknown, wrongPassword]) {
       expect(res.status).toBe(401);
       expect(res.body).toEqual({ message: "invalid credentials" });
     }
+    const googleOnly = await login("google-only@example.com");
+    expect(googleOnly.status).toBe(409);
+    expect(googleOnly.body.code).toBe("ACCOUNT_EXISTS");
   });
 
   it("rejects an empty body with 400 instead of a lookup", async () => {
@@ -271,6 +273,28 @@ describe("service-token internal routes", () => {
       .set("authorization", `Bearer ${token}`)
       .send({ email: "nobody@example.com" });
     expect(missing.status).toBe(404);
+  });
+
+  it("people lookup falls back to profile phoneNumber when user.phone is unset", async () => {
+    const emailUser = await createUser({ email: "profile-phone@example.com" });
+    const loginRes = await login("profile-phone@example.com");
+    const saveProfile = await request(app)
+      .patch("/api/v1/auth/me/profile")
+      .set("authorization", `Bearer ${loginRes.body.accessToken}`)
+      .send({ phoneNumber: "0803 123 4512" });
+    expect(saveProfile.status).toBe(200);
+
+    const token = await serviceToken("auth", "auth:people.read");
+    const byId = await request(app)
+      .get(`/api/v1/auth/internal/v2/people/${String(emailUser._id)}`)
+      .set("authorization", `Bearer ${token}`);
+    expect(byId.status).toBe(200);
+    expect(byId.body).toMatchObject({
+      personId: String(emailUser._id),
+      email: "profile-phone@example.com",
+      phone: "+2348031234512",
+      phoneVerified: false,
+    });
   });
 });
 

@@ -5,7 +5,7 @@ import type { CorsOptions } from "cors";
  * 1. Explicitly configured origins (from CORS_ORIGINS)
  * 2. Local development on any port (localhost / 127.0.0.1)
  * 3. Official Melvin domains (melvingadgets.com, melvingadgets.app)
- * 4. Vercel deployments and preview branches (*.melvingadgets-projects.vercel.app, melvin-os*, aurapaytrack*, easybuy*, store*)
+ * 4. Vercel deployments and preview branches (*.melvingadgets-projects.vercel.app, melvin-os*, aurapaytrack*, easybuy*, store*, computer-village*)
  */
 export const isAllowedOrigin = (
   origin: string | undefined,
@@ -30,7 +30,8 @@ export const isAllowedOrigin = (
     /^https:\/\/melvin-os(-[a-z0-9-]+)?\.vercel\.app$/i.test(cleanOrigin) ||
     /^https:\/\/aurapaytrack(er)?(-[a-z0-9-]+)?\.vercel\.app$/i.test(cleanOrigin) ||
     /^https:\/\/easybuy(-[a-z0-9-]+)?\.vercel\.app$/i.test(cleanOrigin) ||
-    /^https:\/\/store(-[a-z0-9-]+)?\.vercel\.app$/i.test(cleanOrigin)
+    /^https:\/\/store(-[a-z0-9-]+)?\.vercel\.app$/i.test(cleanOrigin) ||
+    /^https:\/\/computer-village(-[a-z0-9-]+)?\.vercel\.app$/i.test(cleanOrigin)
   ) {
     return true;
   }

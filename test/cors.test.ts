@@ -35,6 +35,8 @@ describe("CORS Helper & Origin Validation", () => {
     expect(isAllowedOrigin("https://aurapaytrack-git-feat-apply-merge-melvingadgets-projects.vercel.app")).toBe(true);
     expect(isAllowedOrigin("https://store-melvingadgets-projects.vercel.app")).toBe(true);
     expect(isAllowedOrigin("https://store-52og2d0c9-melvingadgets-projects.vercel.app")).toBe(true);
+    expect(isAllowedOrigin("https://computer-village-bay.vercel.app")).toBe(true);
+    expect(isAllowedOrigin("https://computer-village-t2jm.vercel.app")).toBe(true);
   });
 
   it("allows explicit origins passed in config", () => {
